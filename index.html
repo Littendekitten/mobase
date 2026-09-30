@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MOBASE - 3D Firebase Open World</title>
+  <title>Mobase - 3D Multiplayer</title>
   <link rel="stylesheet" href="style.css">
   
   <!-- Three.js & Controls -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
   
-  <!-- Firebase Compat Libraries -->
+  <!-- Firebase (Compat version for vanilla JS) -->
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
@@ -19,19 +19,15 @@
   <div id="crosshair"></div>
   
   <div id="hud">
-    <h1>MOBASE 3D</h1>
-    <p>Status: <span id="status">Connecting to Firebase...</span></p>
-    <p>Online Players: <span id="player-count">1</span></p>
-    <div class="controls-guide">
-      <b>WASD</b> to Walk | <b>SPACE</b> to Jump<br>
-      <b>LEFT CLICK</b> Place Wall | <b>ESC</b> Pause
-    </div>
+    <h2>MOBASE</h2>
+    <p id="status" class="warning">Connecting to Firebase...</p>
+    <p>Survivors Online: <span id="player-count">1</span></p>
   </div>
 
   <div id="blocker">
     <div id="instructions">
-      <h2>CLICK TO PLAY</h2>
-      <p>Build bases & survive together in real-time!</p>
+      <h1>CLICK TO ENTER THE WASTELAND</h1>
+      <p><b>WASD</b>: Move | <b>SPACE</b>: Jump | <b>LEFT CLICK</b>: Build Wall | <b>ESC</b>: Pause</p>
     </div>
   </div>
 
