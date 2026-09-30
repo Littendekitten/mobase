@@ -5,9 +5,9 @@
   user-select: none;
 }
 
-body, html {
-  width: 100%;
-  height: 100%;
+body {
+  width: 100vw;
+  height: 100vh;
   overflow: hidden;
   font-family: 'Courier New', Courier, monospace;
   background-color: #050505;
@@ -18,39 +18,38 @@ body, html {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 8px;
-  height: 8px;
-  background-color: rgba(0, 255, 102, 0.8);
-  border: 1px solid #000;
+  width: 6px;
+  height: 6px;
+  background-color: #00ff66;
   border-radius: 50%;
   transform: translate(-50%, -50%);
   z-index: 10;
   pointer-events: none;
+  box-shadow: 0 0 10px #00ff66;
 }
 
 #hud {
   position: absolute;
   top: 20px;
   left: 20px;
-  background: rgba(0, 20, 0, 0.75);
+  background: rgba(0, 20, 0, 0.8);
   border: 1px solid #00ff66;
-  padding: 15px;
-  border-radius: 5px;
+  padding: 15px 25px;
+  border-radius: 4px;
   z-index: 10;
   pointer-events: none;
+  text-transform: uppercase;
+  box-shadow: 0 0 15px rgba(0, 255, 102, 0.2);
 }
 
-.controls-guide {
-  margin-top: 10px;
-  font-size: 12px;
-  color: #aaffcc;
-}
+.warning { color: #ffaa00; }
+.success { color: #00ff66; }
 
 #blocker {
   position: absolute;
   width: 100%;
   height: 100%;
-  background-color: rgba(0, 0, 0, 0.85);
+  background-color: rgba(0, 0, 0, 0.9);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -62,11 +61,9 @@ body, html {
   text-align: center;
   border: 2px solid #00ff66;
   padding: 40px;
-  border-radius: 10px;
-  box-shadow: 0 0 20px rgba(0, 255, 102, 0.3);
+  background: rgba(0, 20, 0, 0.9);
+  box-shadow: 0 0 30px rgba(0, 255, 102, 0.3);
 }
 
-#instructions h2 {
-  font-size: 32px;
-  margin-bottom: 10px;
-}
+#instructions h1 { margin-bottom: 20px; font-size: 2rem; }
+#instructions p { color: #aaffcc; }
