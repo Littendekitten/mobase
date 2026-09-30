@@ -1,1 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MOBASE - 3D Firebase Open World</title>
+  <link rel="stylesheet" href="style.css">
+  
+  <!-- Three.js & Controls -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
+  
+  <!-- Firebase Compat Libraries -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+</head>
+<body>
+  <div id="crosshair"></div>
+  
+  <div id="hud">
+    <h1>MOBASE 3D</h1>
+    <p>Status: <span id="status">Connecting to Firebase...</span></p>
+    <p>Online Players: <span id="player-count">1</span></p>
+    <div class="controls-guide">
+      <b>WASD</b> to Walk | <b>SPACE</b> to Jump<br>
+      <b>LEFT CLICK</b> Place Wall | <b>ESC</b> Pause
+    </div>
+  </div>
 
+  <div id="blocker">
+    <div id="instructions">
+      <h2>CLICK TO PLAY</h2>
+      <p>Build bases & survive together in real-time!</p>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
