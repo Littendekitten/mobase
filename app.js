@@ -1,4 +1,4 @@
-// 1. FIREBASE SETUP
+// 1. FIREBASE CONFIGURATION
 const firebaseConfig = {
   apiKey: "YOUR_API_KEY",
   authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
@@ -10,44 +10,81 @@ const firebaseConfig = {
 };
 
 firebase.initializeApp(firebaseConfig);
-const db = firebase.database();
+const db = firebase.database();       // Realtime Database for 3D Movement & Bases
+const fs = firebase.firestore();      // Firestore for Player Profiles & Accounts
 const auth = firebase.auth();
 
 let localUid = null;
+let localDisplayName = "Survivor";
 let remotePlayers = {};
 let placedBlocks = {};
 
-// 2. THREE.JS ENGINE SETUP
+// 2. GOOGLE AUTHENTICATION FLOW
+const googleBtn = document.getElementById('google-btn');
+const provider = new firebase.auth.GoogleAuthProvider();
+
+googleBtn.addEventListener('click', () => {
+  auth.signInWithPopup(provider).catch((error) => {
+    alert("Login failed: " + error.message);
+  });
+});
+
+auth.onAuthStateChanged((user) => {
+  if (user) {
+    localUid = user.uid;
+    localDisplayName = user.displayName || "Survivor";
+
+    // Update UI
+    document.getElementById('player-name').innerText = localDisplayName;
+    document.getElementById('status').innerText = "Online";
+    document.getElementById('status').className = "success";
+    document.getElementById('google-btn').style.display = "none";
+    document.getElementById('login-subtext').style.display = "none";
+    document.getElementById('controls-info').style.display = "block";
+    document.getElementById('blocker').style.cursor = "pointer";
+
+    // Save/Update Profile in Firestore
+    fs.collection('users').doc(localUid).set({
+      name: localDisplayName,
+      email: user.email,
+      photoURL: user.photoURL,
+      lastLogin: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    // Start Realtime Networking
+    initMultiplayer();
+  }
+});
+
+// 3. THREE.JS SCENE SETUP
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0a0f0d);
-scene.fog = new THREE.FogExp2(0x0a0f0d, 0.02); // Apocalyptic fog
+scene.fog = new THREE.FogExp2(0x0a0f0d, 0.02);
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
 
-// Lighting
 scene.add(new THREE.AmbientLight(0xffffff, 0.3));
 const dirLight = new THREE.DirectionalLight(0x00ff66, 1);
 dirLight.position.set(50, 100, 50);
 dirLight.castShadow = true;
 scene.add(dirLight);
 
-// Floor
 const floorMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 });
-const floorGeo = new THREE.PlaneGeometry(500, 500);
-const floor = new THREE.Mesh(floorGeo, floorMat);
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(500, 500), floorMat);
 floor.rotation.x = -Math.PI / 2;
 floor.receiveShadow = true;
 scene.add(floor);
 scene.add(new THREE.GridHelper(500, 100, 0x00ff66, 0x053315));
 
-// 3. PLAYER CONTROLS & PHYSICS
+// 4. CONTROLS & PHYSICS
 const controls = new THREE.PointerLockControls(camera, document.body);
-document.getElementById('blocker').addEventListener('click', () => controls.lock());
+document.getElementById('blocker').addEventListener('click', () => {
+  if (localUid) controls.lock();
+});
 controls.addEventListener('lock', () => document.getElementById('blocker').style.display = 'none');
 controls.addEventListener('unlock', () => document.getElementById('blocker').style.display = 'flex');
 
@@ -61,7 +98,7 @@ document.addEventListener('keydown', (e) => {
   if(e.code === 'KeyS') moveBackward = true;
   if(e.code === 'KeyA') moveLeft = true;
   if(e.code === 'KeyD') moveRight = true;
-  if(e.code === 'Space' && camera.position.y <= 2) velocity.y += 12; // Jump
+  if(e.code === 'Space' && camera.position.y <= 2) velocity.y += 12;
 });
 document.addEventListener('keyup', (e) => {
   if(e.code === 'KeyW') moveForward = false;
@@ -71,7 +108,7 @@ document.addEventListener('keyup', (e) => {
 });
 camera.position.y = 2;
 
-// 4. BASE BUILDING MECHANICS
+// 5. BASE BUILDING (CLICK TO PLACE WALL)
 const raycaster = new THREE.Raycaster();
 window.addEventListener('pointerdown', (e) => {
   if (!controls.isLocked || e.button !== 0) return;
@@ -83,16 +120,15 @@ window.addEventListener('pointerdown', (e) => {
     const hit = intersects[0];
     const target = hit.point.clone().add(hit.face.normal);
     
-    // Snap to 2x2 grid
     const x = Math.round(target.x / 2) * 2;
     const y = Math.max(1, Math.round(target.y / 2) * 2);
     const z = Math.round(target.z / 2) * 2;
 
-    db.ref(`bases/${x}_${y}_${z}`).set({ x, y, z, owner: localUid });
+    db.ref(`bases/${x}_${y}_${z}`).set({ x, y, z, owner: localUid, ownerName: localDisplayName });
   }
 });
 
-// Sync Blocks
+// Sync Blocks from RTDB
 db.ref('bases').on('child_added', (snapshot) => {
   const data = snapshot.val();
   const mat = new THREE.MeshStandardMaterial({ color: 0x334433, roughness: 0.6 });
@@ -104,24 +140,23 @@ db.ref('bases').on('child_added', (snapshot) => {
   placedBlocks[snapshot.key] = mesh;
 });
 
-// 5. FIREBASE MULTIPLAYER NETWORKING
-auth.signInAnonymously().then((res) => {
-  localUid = res.user.uid;
-  const statusEl = document.getElementById('status');
-  statusEl.innerText = "Online - Secure";
-  statusEl.className = "success";
-
+// 6. REALTIME MULTIPLAYER SYNC
+function initMultiplayer() {
   const userRef = db.ref(`players/${localUid}`);
   userRef.onDisconnect().remove();
 
-  // Send position to server (Throttled for performance)
   setInterval(() => {
     if (!controls.isLocked) return;
-    userRef.set({ x: camera.position.x, y: camera.position.y, z: camera.position.z, rotY: camera.rotation.y });
+    userRef.set({
+      name: localDisplayName,
+      x: camera.position.x,
+      y: camera.position.y,
+      z: camera.position.z,
+      rotY: camera.rotation.y
+    });
   }, 100);
-});
+}
 
-// Sync Remote Players
 db.ref('players').on('child_added', (snap) => {
   if (snap.key === localUid) return;
   const mesh = new THREE.Mesh(
@@ -149,7 +184,7 @@ db.ref('players').on('child_removed', (snap) => {
   }
 });
 
-// 6. RENDER LOOP
+// 7. RENDER LOOP
 function animate() {
   requestAnimationFrame(animate);
   const delta = (performance.now() - prevTime) / 1000;
@@ -158,7 +193,7 @@ function animate() {
   if (controls.isLocked) {
     velocity.x -= velocity.x * 10.0 * delta;
     velocity.z -= velocity.z * 10.0 * delta;
-    velocity.y -= 30.0 * delta; // Gravity
+    velocity.y -= 30.0 * delta;
 
     direction.z = Number(moveForward) - Number(moveBackward);
     direction.x = Number(moveRight) - Number(moveLeft);
@@ -174,7 +209,6 @@ function animate() {
     if (camera.position.y < 2) { velocity.y = 0; camera.position.y = 2; }
   }
 
-  // Smooth remote player movement
   for (let id in remotePlayers) {
     const p = remotePlayers[id];
     p.mesh.position.lerp(p.targetPos, 0.2);
