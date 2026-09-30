@@ -10,24 +10,36 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
   
-  <!-- Firebase (Compat version for vanilla JS) -->
+  <!-- Firebase Compat Libraries -->
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
 </head>
 <body>
   <div id="crosshair"></div>
   
   <div id="hud">
-    <h2>MOBASE</h2>
-    <p id="status" class="warning">Connecting to Firebase...</p>
-    <p>Survivors Online: <span id="player-count">1</span></p>
+    <h2>MOBASE 3D</h2>
+    <p>Player: <span id="player-name">Guest</span></p>
+    <p id="status" class="warning">Sign in to start...</p>
+    <p>Survivors Online: <span id="player-count">0</span></p>
   </div>
 
   <div id="blocker">
     <div id="instructions">
-      <h1>CLICK TO ENTER THE WASTELAND</h1>
-      <p><b>WASD</b>: Move | <b>SPACE</b>: Jump | <b>LEFT CLICK</b>: Build Wall | <b>ESC</b>: Pause</p>
+      <h1>MOBASE OPEN WORLD</h1>
+      <p id="login-subtext">Sign in with Google to enter the wasteland and save your bases!</p>
+      
+      <button id="google-btn">
+        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google">
+        Sign in with Google
+      </button>
+
+      <div id="controls-info" style="display: none; margin-top: 20px;">
+        <p><b>CLICK ANYWHERE TO ENTER GAME</b></p>
+        <p style="font-size: 0.8rem; margin-top: 10px;"><b>WASD</b>: Walk | <b>SPACE</b>: Jump | <b>LEFT CLICK</b>: Build Wall | <b>ESC</b>: Pause</p>
+      </div>
     </div>
   </div>
 
