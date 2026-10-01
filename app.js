@@ -15,7 +15,8 @@ const $ = id => document.getElementById(id);
 
 let uid = null, pname = 'Survivor', net = false;
 let hp = 100, scrap = 60, mode = 'combat', sel = 1, nightNo = 0, dayT = 0.2, logs = 0, doors = 0, wasNight = false, spawnCd = 0, hurtCd = 0;
-const remote = {}, blocks = {}, mobs = [], tracers = [], trunks = [];
+const remote = {}, blocks = {}, mobs = [], tracers = [], trunks = [], choppedSet = new Set(), mobById = {};
+let isHost = true, netMobs = {}, mobSeq = 0, pubT = 0, lastK = null;
 
 function start(id, name, online) {
   uid = id; pname = name; net = online;
@@ -35,7 +36,7 @@ auth.onAuthStateChanged(u => {
   userDoc().get().then(d => {
     const v = d.exists ? d.data() : {};
     if (v.pos) P.set(v.pos.x, Math.max(v.pos.y, H(v.pos.x, v.pos.z) + EYE), v.pos.z);
-    if (v.scrap != null) scrap = v.scrap; if (v.nightNo != null) nightNo = v.nightNo; if (v.logs != null) logs = v.logs; if (v.doors != null) doors = v.doors;
+    if (v.scrap != null) scrap = v.scrap; if (v.logs != null) logs = v.logs; if (v.doors != null) doors = v.doors;
     wasNight = Math.sin(dayT * 6.283) < .62;
   }).catch(() => {}).then(() => {
     loaded = true;
@@ -128,8 +129,9 @@ const propMats = [new THREE.MeshStandardMaterial({ color: 0x1b1612, roughness: 1
   new THREE.MeshStandardMaterial({ color: 0x58585a, roughness: .9 }), new THREE.MeshStandardMaterial({ color: 0x33ff88, emissive: 0x22ff77, emissiveIntensity: 2.2 })];
 const propGeo = [new THREE.CylinderGeometry(.18, .3, 1, 6).translate(0, .5, 0), new THREE.DodecahedronGeometry(1).translate(0, .3, 0),
   new THREE.BoxGeometry(1, 1, 1).translate(0, .5, 0), new THREE.OctahedronGeometry(.5).translate(0, .5, 0)];
-const propCfg = [[26, () => [1, 4 + Math.random() * 5, 1]], [14, () => { const s = 1 + Math.random() * 1.8; return [s, s * .8, s]; }],
-  [5, () => [2.5 + Math.random() * 3, 4 + Math.random() * 6, 2.5 + Math.random() * 3]], [7, () => { const s = 1 + Math.random() * 2; return [s * .6, s * 2, s * .6]; }]];
+const propCfg = [[26, r => [1, 4 + r() * 5, 1]], [14, r => { const s = 1 + r() * 1.8; return [s, s * .8, s]; }],
+  [5, r => [2.5 + r() * 3, 4 + r() * 6, 2.5 + r() * 3]], [7, r => { const s = 1 + r() * 2; return [s * .6, s * 2, s * .6]; }]];
+const mul = a => () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
 
 function paintChunk(g) {
   const p = g.attributes.position, ca = g.attributes.color, c = new THREE.Color();
@@ -146,14 +148,15 @@ function makeChunk(i, j) {
   const g = new THREE.PlaneGeometry(CS, CS, CS, CS); g.rotateX(-Math.PI / 2); g.translate(i * CS, 0, j * CS);
   g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 3), 3)); paintChunk(g);
   const mesh = new THREE.Mesh(g, terrMat); mesh.receiveShadow = true; tg.add(mesh);
-  const props = [], d = new THREE.Object3D();
+  const props = [], d = new THREE.Object3D(), rng = mul(((i * 73856093) ^ (j * 19349663)) >>> 0);
   propCfg.forEach(([n, sc], k) => {
-    const im = new THREE.InstancedMesh(propGeo[k], propMats[k], n); let cnt = 0;
+    const im = new THREE.InstancedMesh(propGeo[k], propMats[k], n), ids = []; let cnt = 0;
     for (let q = 0; q < n; q++) {
-      const x = (i - .5 + Math.random()) * CS, z = (j - .5 + Math.random()) * CS; if (Math.hypot(x, z) < 24) continue;
-      d.position.set(x, H(x, z) - .2, z); d.rotation.set(0, Math.random() * 6.28, 0); const s = sc(); d.scale.set(...s); d.updateMatrix(); im.setMatrixAt(cnt++, d.matrix);
+      const x = (i - .5 + rng()) * CS, z = (j - .5 + rng()) * CS, ry = rng() * 6.28, sv = sc(rng); if (Math.hypot(x, z) < 24) continue;
+      d.position.set(x, H(x, z) - .2, z); d.rotation.set(0, ry, 0); d.scale.set(...sv); d.updateMatrix(); ids.push(i + '_' + j + '_' + q); im.setMatrixAt(cnt++, d.matrix);
     }
-    im.count = cnt; im.frustumCulled = false; im.castShadow = true; im.receiveShadow = true; scene.add(im); props.push(im); if (k === 0) trunks.push(im);
+    im.count = cnt; im.userData.ids = ids; im.frustumCulled = false; im.castShadow = true; im.receiveShadow = true; scene.add(im); props.push(im);
+    if (k === 0) { trunks.push(im); ids.forEach((id, n2) => { if (choppedSet.has(id)) im.setMatrixAt(n2, ZERO); }); im.instanceMatrix.needsUpdate = true; }
   });
   chunks[i + ',' + j] = { mesh, props };
 }
@@ -172,7 +175,7 @@ function digAt(px, pz, amt) {
   const R = 2.6, up = {};
   for (let ix = Math.floor(px - R); ix <= Math.ceil(px + R); ix++) for (let iz = Math.floor(pz - R); iz <= Math.ceil(pz + R); iz++) {
     const d = Math.hypot(ix - px, iz - pz); if (d > R) continue;
-    const k = ix + ',' + iz, v = Math.min(1.5, Math.max(-8, (dg[k] || 0) + amt * (.3 + .7 * (1 - d / R))));
+    const k = ix + ',' + iz, v = Math.min(1.5, Math.max(-24, (dg[k] || 0) + amt * (.3 + .7 * (1 - d / R))));
     if (!(k in dg)) dn++; dg[k] = v; markDirty(ix, iz); up[ix + '_' + iz] = +v.toFixed(2);
   }
   db.ref('holes').update(up).catch(() => {});
@@ -183,6 +186,12 @@ function initNet() {
   db.ref('bases').remove().catch(() => {}); // wipe leftover blocks from old versions
   const onHole = s => { const v = s.val(), [ix, iz] = s.key.split('_').map(Number), k = ix + ',' + iz; if (dg[k] === v) return; if (!(k in dg)) dn++; dg[k] = v; markDirty(ix, iz); };
   db.ref('holes').on('child_added', onHole); db.ref('holes').on('child_changed', onHole);
+  db.ref('chopped').on('child_added', s => { choppedSet.add(s.key); applyChop(s.key); });
+  db.ref('doors').on('child_added', s => addDoor(s.key, s.val())); db.ref('doors').on('child_removed', s => removeDoor(s.key));
+  db.ref('world/night').on('value', s => { nightNo = s.val() || 0; });
+  db.ref('kills/' + uid).on('value', s => { const v = s.val() || 0; if (lastK !== null && v > lastK) scrap += v - lastK; lastK = v; });
+  db.ref('mobs').on('value', s => { netMobs = s.val() || {}; syncMobs(); });
+  db.ref('mobhits').on('child_added', s => { if (!isHost) return; const v = s.val(); s.ref.remove(); applyHit(v.id, v.d, v.by); });
   const me = db.ref('players/' + uid); me.onDisconnect().remove();
   setInterval(() => { if (controls.isLocked) me.set({ name: pname, x: camera.position.x, y: camera.position.y, z: camera.position.z }); }, 100);
   db.ref('players').on('child_added', s => {
@@ -233,7 +242,7 @@ function fire() {
   ammo--; shotCd = .13; recoil = 1; flashT = .05; camera.rotation.x = Math.min(1.5, camera.rotation.x + .012); sfx(520, .12, 'square', .05, 110);
   const h = ray([mg, tg], 90)[0], dir = new THREE.Vector3(); camera.getWorldDirection(dir);
   tracer(camera.localToWorld(new THREE.Vector3(.28, -.23, -1.15)), h ? h.point : P.clone().addScaledVector(dir, 90), 0xffee88);
-  if (h && h.object.parent.userData.mob) hurtMob(h.object.parent, 20);
+  let mo = h && h.object; while (mo && !mo.userData.mob && mo.parent) mo = mo.parent; if (mo && mo.userData.mob) hurtMob(mo, 20);
   if (ammo <= 0) reload = 1.2;
 }
 addEventListener('mousedown', e => { if (!controls.isLocked) return; if (e.button === 0) mouseL = true; if (e.button === 2) mouseR = true; });
@@ -241,38 +250,68 @@ addEventListener('mouseup', e => { if (e.button === 0) mouseL = false; if (e.but
 addEventListener('contextmenu', e => e.preventDefault());
 
 // ===== WOOD / TRAPDOOR / BUNKER =====
-const ZERO = new THREE.Matrix4().makeScale(0, 0, 0), chopHits = {}, placed = [];
+const ZERO = new THREE.Matrix4().makeScale(0, 0, 0), chopHits = {}, placed = [], MAXS = 26;
 const doorMat = new THREE.MeshStandardMaterial({ color: 0x6b4423, roughness: .85 }), barMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, metalness: .8, roughness: .4 });
-const covered = () => placed.some(d => Math.hypot(d.position.x - P.x, d.position.z - P.z) < 1.6 && d.position.y > P.y && d.position.y < P.y + 8);
+const inRect = (u, x, z, m = 0) => Math.abs(x - u.x) < u.w / 2 + m && Math.abs(z - u.z) < u.d / 2 + m;
+const covered = () => placed.some(u => inRect(u, P.x, P.z) && u.y > P.y);
+const doorBlock = (x, z) => placed.some(u => inRect(u, x, z, .5));
 function msg(s) { $('status').innerText = s; setTimeout(() => $('status').innerText = net ? 'Online' : 'Offline', 2000); }
+function applyChop(key) { const [i, j] = key.split('_'), c = chunks[i + ',' + j]; if (!c) return; const im = c.props[0], n = im.userData.ids.indexOf(key); if (n >= 0) { im.setMatrixAt(n, ZERO); im.instanceMatrix.needsUpdate = true; } }
 function chop(h) {
-  const im = h.object, id = h.instanceId; if (id == null) return; const k = im.id + '_' + id; sfx(200, .1, 'square', .06, 120);
-  if ((chopHits[k] = (chopHits[k] || 0) + 1) < 3) return;
-  im.setMatrixAt(id, ZERO); im.instanceMatrix.needsUpdate = true; logs += 3;
+  const im = h.object, id = h.instanceId; if (id == null) return; const key = im.userData.ids[id]; sfx(200, .1, 'square', .06, 120);
+  if ((chopHits[key] = (chopHits[key] || 0) + 1) < 3) return;
+  choppedSet.add(key); applyChop(key); logs += 3; if (net) db.ref('chopped/' + key).set(1).catch(() => {});
 }
 function craft() { if (logs >= 4) { logs -= 4; doors++; sfx(300, .15, 'triangle', .06, 200); } else msg('Need 4 wood'); }
+// where would a trapdoor go? Stretches over the whole pit (up to MAXS wide), otherwise a small 2.4 door.
+function doorTarget() {
+  const inPit = H0(P.x, P.z) - H(P.x, P.z) >= 2 && camera.rotation.x > .5; let cx, cz;
+  if (inPit) { cx = P.x; cz = P.z; } else { const h = ray([tg], 10)[0]; if (!h) return null; cx = h.point.x; cz = h.point.z; }
+  const ci = Math.floor(cx), cj = Math.floor(cz), dug = (a, b) => (dg[a + ',' + b] || 0) < -.3; let seed = null;
+  for (let a = -1; a <= 2 && !seed; a++) for (let b = -1; b <= 2; b++) if (dug(ci + a, cj + b)) { seed = [ci + a, cj + b]; break; }
+  let x0 = cx - 1.2, x1 = cx + 1.2, z0 = cz - 1.2, z1 = cz + 1.2;
+  if (seed) {
+    const seen = new Set([seed.join()]), q = [seed]; x0 = z0 = 1e9; x1 = z1 = -1e9;
+    while (q.length && seen.size < 1200) { const [a, b] = q.pop(); x0 = Math.min(x0, a - 1.8); x1 = Math.max(x1, a + 1.8); z0 = Math.min(z0, b - 1.8); z1 = Math.max(z1, b + 1.8);
+      for (const [da, db2] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const na = a + da, nb = b + db2, k = na + ',' + nb; if (!seen.has(k) && dug(na, nb) && Math.abs(na - ci) <= 16 && Math.abs(nb - cj) <= 16) { seen.add(k); q.push([na, nb]); } } }
+  }
+  const w = Math.min(MAXS, x1 - x0), d = Math.min(MAXS, z1 - z0), x = (x0 + x1) / 2, z = (z0 + z1) / 2; let y = -1e9;
+  for (const fx of [-.5, 0, .5]) for (const fz of [-.5, 0, .5]) y = Math.max(y, H0(x + fx * w, z + fz * d));
+  return { x: +x.toFixed(2), y: +(y + .1).toFixed(2), z: +z.toFixed(2), w: +w.toFixed(2), d: +d.toFixed(2), big: x1 - x0 > MAXS || z1 - z0 > MAXS };
+}
 function placeDoor() {
   if (doors <= 0) return msg('Craft a trapdoor (C)');
-  const h = ray([tg], 6)[0], pit = H0(P.x, P.z) - H(P.x, P.z) >= 2; let x, z, y;
-  if (pit && camera.rotation.x > .5) { x = P.x; z = P.z; y = H0(x, z) + .1; }
-  else if (h) { x = h.point.x; z = h.point.z; y = h.point.y + .08; }
-  else return;
-  const g = new THREE.Group(), add = (w, hh, d, m, px, py) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, hh, d), m); o.position.set(px, py, 0); o.castShadow = o.receiveShadow = true; g.add(o); };
-  add(2.4, .14, 2.4, doorMat, 0, 0); [-.8, 0, .8].forEach(px => add(.06, .16, 2.4, barMat, px, 0)); add(.4, .08, .1, barMat, 0, .1);
-  g.position.set(x, y, z); scene.add(g); placed.push(g); doors--; sfx(120, .15, 'triangle', .08, 70);
-  if (pit && camera.rotation.x > .5) msg('Bunker sealed');
+  const t = doorTarget(); if (!t) return; doors--; const { big, ...data } = t; sfx(120, .15, 'triangle', .08, 70);
+  if (net) db.ref('doors').push(data).catch(() => {}); else addDoor('l' + Date.now(), data);
+  msg(big ? 'Pit bigger than max door size' : data.w > 3 ? 'Pit covered' : 'Trapdoor placed');
 }
+function addDoor(key, v) {
+  if (placed.some(u => u.key === key)) return;
+  const g = new THREE.Group(), add = (w, h, d, m, px) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); o.position.x = px; o.castShadow = o.receiveShadow = true; g.add(o); return o; };
+  add(v.w, .14, v.d, doorMat, 0); const nb = Math.max(2, Math.round(v.w / .9)); for (let n = 0; n <= nb; n++) add(.06, .16, v.d, barMat, -v.w / 2 + v.w * n / nb);
+  add(.4, .08, .1, barMat, 0).position.y = .1; g.position.set(v.x, v.y, v.z); scene.add(g); placed.push({ key, x: v.x, y: v.y, z: v.z, w: v.w, d: v.d, g });
+}
+function removeDoor(key) { const n = placed.findIndex(u => u.key === key); if (n >= 0) { scene.remove(placed[n].g); placed.splice(n, 1); } }
 function openDoor() {
-  let b = null, bd = 3.2; for (const d of placed) { const q = Math.hypot(d.position.x - P.x, d.position.z - P.z); if (q < bd) { bd = q; b = d; } }
-  if (b) { scene.remove(b); placed.splice(placed.indexOf(b), 1); doors++; sfx(150, .12, 'triangle', .06, 90); }
+  let b = null, bd = 1e9; for (const u of placed) if (inRect(u, P.x, P.z, 2.5)) { const q = Math.hypot(u.x - P.x, u.z - P.z); if (q < bd) { bd = q; b = u; } }
+  if (!b) return; doors++; sfx(150, .12, 'triangle', .06, 90); if (net) db.ref('doors/' + b.key).remove().catch(() => {}); else removeDoor(b.key);
 }
-// ===== MOBS =====
+// see-through preview of where the trapdoor will go
+const ghost = new THREE.Group(), gbox = new THREE.BoxGeometry(1, 1, 1), gm = new THREE.Mesh(gbox, new THREE.MeshBasicMaterial({ color: 0x00ff66, transparent: true, opacity: .22, depthWrite: false })), ge = new THREE.LineSegments(new THREE.EdgesGeometry(gbox), new THREE.LineBasicMaterial({ color: 0x00ff66 }));
+ghost.add(gm, ge); ghost.visible = false; scene.add(ghost); let ghostT = 0, gt = null;
+function updateGhost(dt) {
+  if (!(controls.isLocked && mode === 'door')) { ghost.visible = false; return; }
+  if ((ghostT -= dt) <= 0) { ghostT = .08; gt = doorTarget(); }
+  ghost.visible = !!gt; if (!gt) return; ghost.position.set(gt.x, gt.y, gt.z); ghost.scale.set(gt.w, .14, gt.d);
+  const c = doors > 0 ? 0x00ff66 : 0xff3344; gm.material.color.setHex(c); ge.material.color.setHex(c);
+}
+
+// ===== MOBS (host-simulated: one player's browser runs the zombies, everyone else just watches them) =====
 const eyeMat = new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xff2200, emissiveIntensity: 3 }), bloodMat = new THREE.MeshStandardMaterial({ color: 0x5a0d0d, roughness: .6 });
 const ZT = [{ hp: 30, sp: 2.4, sc: 1, skin: 0x6f8a5a, cloth: 0x3b4a5a, dmg: 8 }, { hp: 18, sp: 5.2, sc: .9, skin: 0x9aa58a, cloth: 0x5a3b3b, dmg: 6 }, { hp: 120, sp: 1.7, sc: 1.45, skin: 0x4a5a45, cloth: 0x2a2a2a, dmg: 22 }];
 const corpses = [];
-function spawnMob() {
-  const a = Math.random() * 6.283, r = 40 + Math.random() * 20, x = P.x + Math.cos(a) * r, z = P.z + Math.sin(a) * r, g = new THREE.Group();
-  const ty = Math.random() < .08 + nightNo * .03 ? 2 : Math.random() < .3 ? 1 : 0, Z = ZT[ty];
+function buildMob(ty) {
+  const Z = ZT[ty], g = new THREE.Group();
   const sk = new THREE.MeshStandardMaterial({ color: Z.skin, roughness: .95 }), cl = new THREE.MeshStandardMaterial({ color: Z.cloth, roughness: 1 });
   const box = (w, h, d, m, y, par) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); b.position.y = y; b.castShadow = true; par.add(b); return b; };
   const limb = (w, h, px, py, m) => { const p = new THREE.Group(); p.position.set(px, py, 0); box(w, h, w, m, -h / 2, p); g.add(p); return p; };
@@ -280,30 +319,63 @@ function spawnMob() {
   const head = new THREE.Group(); head.position.y = 1.85; box(.5, .5, .5, sk, 0, head); box(.36, .12, .12, bloodMat, -.2, head).position.z = .22;
   [-.12, .12].forEach(ex => { const e = box(.1, .08, .05, eyeMat, .06, head); e.position.x = ex; e.position.z = .26; }); g.add(head);
   const A = [limb(.22, .9, -.52, 1.55, sk), limb(.22, .9, .52, 1.55, sk)], L = [limb(.26, .8, -.2, .8, cl), limb(.26, .8, .2, .8, cl)];
-  g.scale.setScalar(Z.sc); g.userData.mob = { hp: Z.hp * (1 + nightNo * .15), sp: Z.sp * (.9 + Math.random() * .2), dmg: Z.dmg + nightNo, ph: Math.random() * 6, ty, head, A, L };
-  g.position.set(x, H(x, z), z); mg.add(g); mobs.push(g); sfx(80 + Math.random() * 40, .9, 'sawtooth', .04, 45);
+  g.scale.setScalar(Z.sc); g.userData.mob = { hp: Z.hp, sp: Z.sp, dmg: Z.dmg, ph: Math.random() * 6, ty, head, A, L };
+  return g;
 }
-function killMob(g, reward) {
-  const m = g.userData.mob; if (reward) scrap++;
-  g.userData.mob = null; g.userData.dead = 3; mobs.splice(mobs.indexOf(g), 1); corpses.push(g); sfx(140, .5, 'sawtooth', .07, 35);
+function spawnMob(p) {
+  const a = Math.random() * 6.283, r = 40 + Math.random() * 20, x = p.x + Math.cos(a) * r, z = p.z + Math.sin(a) * r;
+  const ty = Math.random() < .08 + nightNo * .03 ? 2 : Math.random() < .3 ? 1 : 0, g = buildMob(ty), m = g.userData.mob, Z = ZT[ty];
+  m.hp = Z.hp * (1 + nightNo * .15); m.sp = Z.sp * (.9 + Math.random() * .2); m.dmg = Z.dmg + nightNo;
+  g.userData.id = 'm' + Date.now().toString(36) + (mobSeq++); g.position.set(x, H(x, z), z); mg.add(g); mobs.push(g); mobById[g.userData.id] = g; sfx(80 + Math.random() * 40, .9, 'sawtooth', .04, 45);
 }
-function hurtMob(g, d) { const m = g.userData.mob; if (!m) return; m.hp -= d; sfx(160, .15, 'square', .05, 80); if (m.hp <= 0) killMob(g, true); }
-function updateMobs(dt, t) {
-  for (let i = corpses.length - 1; i >= 0; i--) { const c = corpses[i]; c.rotation.x = Math.max(-1.5, c.rotation.x - dt * 4); if ((c.userData.dead -= dt) <= 0) { mg.remove(c); corpses.splice(i, 1); } }
+function killMob(g) {
+  const n = mobs.indexOf(g); if (n < 0) return; delete mobById[g.userData.id]; g.userData.mob = null; g.userData.dead = 3; mobs.splice(n, 1); corpses.push(g); sfx(140, .5, 'sawtooth', .07, 35);
+}
+function dropMob(g) { const n = mobs.indexOf(g); if (n >= 0) mobs.splice(n, 1); delete mobById[g.userData.id]; mg.remove(g); }
+function applyHit(id, d, by) { // runs on the host only
+  const g = mobById[id], m = g && g.userData.mob; if (!m) return; m.hp -= d; sfx(160, .15, 'square', .05, 80);
+  if (m.hp <= 0) { killMob(g); if (net) db.ref('kills/' + by).transaction(n => (n || 0) + 1).catch(() => {}); else scrap++; }
+}
+function hurtMob(g, d) { if (!g.userData.mob) return; if (!net || isHost) applyHit(g.userData.id, d, uid); else { sfx(160, .15, 'square', .05, 80); db.ref('mobhits').push({ id: g.userData.id, d, by: uid }).catch(() => {}); } }
+function syncMobs() { // non-host: mirror the host's zombies
+  if (isHost) return;
+  for (const id in netMobs) { const v = netMobs[id]; let g = mobById[id];
+    if (!g) { g = buildMob(v.t); g.userData.id = id; g.position.set(v.x, H(v.x, v.z), v.z); mobById[id] = g; mg.add(g); mobs.push(g); }
+    const m = g.userData.mob; if (m) { m.hp = v.h; m.sp = v.s; m.dmg = v.d; } g.userData.tx = v.x; g.userData.tz = v.z; g.userData.ry = v.r; }
+  for (const id in mobById) if (!(id in netMobs)) killMob(mobById[id]);
+}
+function hostTick(dt, isNight) {
+  const ps = [{ x: P.x, z: P.z }]; for (const id in remote) ps.push({ x: remote[id].tp.x, z: remote[id].tp.z });
+  for (const g of [...mobs]) if (ps.every(p => Math.hypot(p.x - g.position.x, p.z - g.position.z) > 110)) dropMob(g);
+  if ((spawnCd -= dt) <= 0 && mobs.length < (isNight ? 8 + nightNo * 4 + (ps.length - 1) * 4 : 2 * ps.length)) { spawnMob(ps[Math.floor(Math.random() * ps.length)]); spawnCd = isNight ? 2 : 12; }
+  const sl = Math.min(1, Math.max(0, (Math.sin(dayT * 6.283) - .65) * 10));
   for (const g of [...mobs]) {
-    const m = g.userData.mob, sl = Math.min(1, Math.max(0, (Math.sin(dayT * 6.283) - .65) * 10));
-    if (sl > .3 && (m.hp -= sl * .5 * dt) <= 0) { killMob(g, false); continue; }
-    const dx = P.x - g.position.x, dz = P.z - g.position.z, d = Math.hypot(dx, dz), y = g.position.y, w = Math.sin(t * m.sp * 2.2 + m.ph);
-    g.rotation.y = Math.atan2(dx, dz); m.L[0].rotation.x = w * .7; m.L[1].rotation.x = -w * .7; m.A[0].rotation.x = -1.4 + w * .12; m.A[1].rotation.x = -1.4 - w * .12; m.head.rotation.z = Math.sin(t * 2 + m.ph) * .15;
+    const m = g.userData.mob; if (sl > .3 && (m.hp -= sl * .5 * dt) <= 0) { killMob(g); continue; }
+    let tp = ps[0], bd = 1e9; for (const p of ps) { const q = Math.hypot(p.x - g.position.x, p.z - g.position.z); if (q < bd) { bd = q; tp = p; } }
+    const dx = tp.x - g.position.x, dz = tp.z - g.position.z, d = Math.hypot(dx, dz), y = g.position.y; g.rotation.y = Math.atan2(dx, dz);
     if (d > 1.5 * g.scale.x) {
       const sx = dx / d * m.sp * dt, sz = dz / d * m.sp * dt, px = g.position.x, pz = g.position.z;
-      const steep = (nx, nz) => H(nx, nz) - y > 1.3 * Math.hypot(nx - px, nz - pz);
-      if (!steep(px + sx, pz)) g.position.x += sx; if (!steep(g.position.x, pz + sz)) g.position.z += sz;
+      const steep = (nx, nz) => H(nx, nz) - y > 1.3 * Math.hypot(nx - px, nz - pz), blk = (nx, nz) => doorBlock(nx, nz) && !doorBlock(px, pz); // zombies can't pass trapdoors
+      if (!steep(px + sx, pz) && !blk(px + sx, pz)) g.position.x += sx; if (!steep(g.position.x, pz + sz) && !blk(g.position.x, pz + sz)) g.position.z += sz;
       g.position.y = H(g.position.x, g.position.z);
-    } else if (hurtCd <= 0 && Math.abs(P.y - EYE - y) < 2.5 && !covered()) {
-      hp -= m.dmg; hurtCd = .8; sfx(70, .3, 'square', .1, 40); $('hurt').style.opacity = 1; setTimeout(() => $('hurt').style.opacity = 0, 120);
     }
   }
+  if (net && (pubT -= dt) <= 0) { pubT = .15; const o = {}; for (const g of mobs) { const m = g.userData.mob; o[g.userData.id] = { x: +g.position.x.toFixed(1), z: +g.position.z.toFixed(1), r: +g.rotation.y.toFixed(2), t: m.ty, h: Math.round(m.hp), s: +m.sp.toFixed(2), d: m.dmg }; } db.ref('mobs').set(Object.keys(o).length ? o : null).catch(() => {}); }
+}
+function animMobs(dt, t) {
+  for (let i = corpses.length - 1; i >= 0; i--) { const c = corpses[i]; c.rotation.x = Math.max(-1.5, c.rotation.x - dt * 4); if ((c.userData.dead -= dt) <= 0) { mg.remove(c); corpses.splice(i, 1); } }
+  for (const g of mobs) {
+    const m = g.userData.mob, w = Math.sin(t * m.sp * 2.2 + m.ph), u = g.userData;
+    if (!isHost && u.tx != null) { const k = Math.min(1, dt * 8); g.position.x += (u.tx - g.position.x) * k; g.position.z += (u.tz - g.position.z) * k; g.position.y = H(g.position.x, g.position.z);
+      let da = u.ry - g.rotation.y; da = Math.atan2(Math.sin(da), Math.cos(da)); g.rotation.y += da * k; }
+    m.L[0].rotation.x = w * .7; m.L[1].rotation.x = -w * .7; m.A[0].rotation.x = -1.4 + w * .12; m.A[1].rotation.x = -1.4 - w * .12; m.head.rotation.z = Math.sin(t * 2 + m.ph) * .15;
+  }
+}
+function hurtFromMobs() { // every player damages only themselves
+  if (hurtCd > 0 || covered()) return;
+  for (const g of mobs) { const m = g.userData.mob;
+    if (Math.hypot(P.x - g.position.x, P.z - g.position.z) <= 1.5 * g.scale.x && Math.abs(P.y - EYE - g.position.y) < 2.5) {
+      hp -= m.dmg; hurtCd = .8; sfx(70, .3, 'square', .1, 40); $('hurt').style.opacity = 1; setTimeout(() => $('hurt').style.opacity = 0, 120); break; } }
 }
 // ===== LOOP =====
 const PAL = { dt: new THREE.Color(0x6a8f9a), db: new THREE.Color(0xc2a878), nt: new THREE.Color(0x02040c), nb: new THREE.Color(0x0c1c18) };
@@ -314,7 +386,8 @@ function loop() {
 
   dayT = (Date.now() / 1000 / 360) % 1; // shared wall-clock time: same for every player
   const isNight = Math.sin(dayT * 6.283) < .62;
-  if (isNight && !wasNight) { nightNo++; spawnCd = 0; } wasNight = isNight;
+  isHost = !net || [uid, ...Object.keys(remote)].sort()[0] === uid; // lowest player id runs the zombies
+  if (isNight && !wasNight) { if (!net) nightNo++; else if (isHost) db.ref('world/night').transaction(n => (n || 0) + 1).catch(() => {}); spawnCd = 0; } wasNight = isNight;
 
   if (controls.isLocked) {
     const f = (key.KeyW ? 1 : 0) - (key.KeyS ? 1 : 0), r = (key.KeyD ? 1 : 0) - (key.KeyA ? 1 : 0), yaw = camera.rotation.y;
@@ -324,18 +397,19 @@ function loop() {
     for (let n = 0; n < steps; n++) {
       const nx = P.x + vx * sdt; if (!hit(nx, P.z)) P.x = nx;
       const nz = P.z + vz * sdt; if (!hit(P.x, nz)) P.z = nz;
-      vy -= 30 * sdt; P.y += vy * sdt; const gy = H(P.x, P.z) + EYE;
+      vy -= 30 * sdt; P.y += vy * sdt; let fl = H(P.x, P.z); // trapdoors are solid: stand on top, can't jump through from below
+      for (const dr of placed) if (inRect(dr, P.x, P.z)) { if (P.y - EYE >= dr.y - .5) fl = Math.max(fl, dr.y + .08); else if (P.y > dr.y - .2) { P.y = dr.y - .2; if (vy > 0) vy = 0; } }
+      const gy = fl + EYE;
       if (vy <= 0 && P.y <= gy + (ground ? .5 : 0)) { P.y = gy; vy = 0; ground = true; } else ground = false;
     }
 
-    for (let i = mobs.length - 1; i >= 0; i--) if (mobs[i].position.distanceTo(P) > 110) { mg.remove(mobs[i]); mobs.splice(i, 1); }
-    if ((spawnCd -= dt) <= 0 && mobs.length < (isNight ? 8 + nightNo * 4 : 2)) { spawnMob(); spawnCd = isNight ? 2 : 12; }
-    updateMobs(dt, t);
+    hurtFromMobs();
     if ((saveT += dt) > 10) { saveT = 0; save(); }
     if (hp < 100 && hurtCd < -4) hp = Math.min(100, hp + dt * 3);
     if (hp <= 0) { P.set(0, EYE, 8); vx = vz = vy = 0; hp = 100; }
   }
 
+  if (isHost) hostTick(dt, isNight); animMobs(dt, t); updateGhost(dt);
   updateChunks();
   for (const k of dirty) if (chunks[k]) paintChunk(chunks[k].mesh.geometry);
   dirty.clear();
