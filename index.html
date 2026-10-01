@@ -5,41 +5,49 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Mobase - 3D Wasteland</title>
   <link rel="stylesheet" href="style.css">
-  
-  <!-- Three.js & PointerLock Controls -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
-  
-  <!-- Firebase Libraries (Compat for vanilla JS) -->
+  <script>
+    const E = "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/";
+    ["controls/PointerLockControls","shaders/CopyShader","shaders/LuminosityHighPassShader","postprocessing/EffectComposer","postprocessing/RenderPass","postprocessing/ShaderPass","postprocessing/UnrealBloomPass"]
+      .forEach(f => document.write('<script src="' + E + f + '.js"><\/script>'));
+  </script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
 </head>
 <body>
+  <div id="hurt"></div>
   <div id="crosshair"></div>
-  
+
   <div id="hud">
-    <h2>MOBASE 3D</h2>
+    <h2>MOBASE</h2>
     <p>Survivor: <span id="player-name">Guest</span></p>
     <p>Status: <span id="status" class="warning">Sign in required</span></p>
-    <p>Players Online: <span id="player-count">0</span></p>
+    <p>Players: <span id="player-count">0</span></p>
+    <p>Scrap: <b id="scrap">0</b> | Mode: <b id="mode">COMBAT</b></p>
+    <p id="clock">DAY</p>
+    <div id="hpbar"><div id="hpfill"></div></div>
   </div>
+
+  <div id="hotbar"></div>
 
   <div id="blocker">
     <div id="instructions">
-      <h1>MOBASE WASTELAND</h1>
-      <p id="login-subtext">Sign in with Google to enter the world and save your base!</p>
-      
+      <h1>MOBASE</h1>
+      <p id="login-subtext">Survive the night. Build a base. Hold the line.</p>
       <button id="google-btn">
         <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google">
         Sign in with Google
       </button>
-
-      <div id="controls-info" style="display: none; margin-top: 20px;">
-        <p style="color: #00ff66; margin-bottom: 10px;"><b>CLICK ANYWHERE TO ENTER GAME</b></p>
-        <p style="font-size: 0.85rem; color: #aaffcc;">
-          <b>WASD</b>: Walk | <b>SPACE</b>: Jump | <b>LEFT CLICK</b>: Build Wall | <b>ESC</b>: Pause
+      <button id="offline-btn">Play offline</button>
+      <div id="controls-info" style="display:none; margin-top:20px;">
+        <p style="color:#00ff66; margin-bottom:10px;"><b>CLICK TO ENTER</b></p>
+        <p style="font-size:.85rem; color:#aaffcc; line-height:1.6;">
+          <b>WASD</b> walk | <b>SHIFT</b> sprint | <b>SPACE</b> jump<br>
+          <b>Q</b> combat/build | <b>1-4</b> wall, steel, lamp, turret<br>
+          <b>LEFT</b> shoot / place | <b>RIGHT</b> remove (yours)<br>
+          Mobs come at night. Kill them for scrap.
         </p>
       </div>
     </div>
