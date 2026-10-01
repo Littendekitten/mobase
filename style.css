@@ -1,105 +1,22 @@
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-  user-select: none;
-}
-
-body {
-  width: 100vw;
-  height: 100vh;
-  overflow: hidden;
-  font-family: 'Courier New', Courier, monospace;
-  background-color: #050505;
-  color: #00ff66;
-}
-
-#crosshair {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 6px;
-  height: 6px;
-  background-color: #00ff66;
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 10;
-  pointer-events: none;
-  box-shadow: 0 0 10px #00ff66;
-}
-
-#hud {
-  position: absolute;
-  top: 20px;
-  left: 20px;
-  background: rgba(0, 20, 0, 0.85);
-  border: 1px solid #00ff66;
-  padding: 15px 25px;
-  border-radius: 4px;
-  z-index: 10;
-  pointer-events: none;
-  text-transform: uppercase;
-  box-shadow: 0 0 15px rgba(0, 255, 102, 0.2);
-}
-
-.warning { color: #ffaa00; }
-.success { color: #00ff66; }
-
-#blocker {
-  position: absolute;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(0, 0, 0, 0.9);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 20;
-}
-
-#instructions {
-  text-align: center;
-  border: 2px solid #00ff66;
-  padding: 40px;
-  background: rgba(0, 20, 0, 0.95);
-  box-shadow: 0 0 30px rgba(0, 255, 102, 0.3);
-  max-width: 480px;
-}
-
-#instructions h1 { 
-  margin-bottom: 15px; 
-  font-size: 2rem; 
-  text-shadow: 0 0 10px #00ff66;
-}
-
-#instructions p { 
-  color: #aaffcc; 
-  margin-bottom: 20px; 
-}
-
-#google-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background-color: #ffffff;
-  color: #757575;
-  border: none;
-  border-radius: 4px;
-  padding: 12px 24px;
-  font-size: 16px;
-  font-weight: 500;
-  font-family: Arial, sans-serif;
-  cursor: pointer;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.25);
-  transition: background-color 0.2s, box-shadow 0.2s;
-}
-
-#google-btn:hover {
-  background-color: #eeeeee;
-  box-shadow: 0 4px 8px rgba(0,0,0,0.3);
-}
-
-#google-btn img {
-  width: 20px;
-  height: 20px;
-  margin-right: 12px;
-}
+* { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+body { width: 100vw; height: 100vh; overflow: hidden; font-family: 'Courier New', Courier, monospace; background: #050505; color: #00ff66; }
+#crosshair { position: absolute; top: 50%; left: 50%; width: 6px; height: 6px; background: #00ff66; border-radius: 50%; transform: translate(-50%, -50%); z-index: 10; pointer-events: none; box-shadow: 0 0 10px #00ff66; }
+#hud { position: absolute; top: 20px; left: 20px; background: rgba(0, 20, 0, .8); border: 1px solid #00ff66; padding: 14px 22px; border-radius: 4px; z-index: 10; pointer-events: none; text-transform: uppercase; font-size: 14px; line-height: 1.5; box-shadow: 0 0 15px rgba(0, 255, 102, .2); }
+#hpbar { margin-top: 8px; height: 8px; border: 1px solid #00ff66; }
+#hpfill { height: 100%; width: 100%; background: #00ff66; transition: width .2s; }
+.warning { color: #ffaa00; } .success { color: #00ff66; }
+#hurt { position: absolute; inset: 0; z-index: 9; pointer-events: none; opacity: 0; transition: opacity .5s; box-shadow: inset 0 0 160px 40px #f03; }
+#hotbar { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; z-index: 10; pointer-events: none; }
+.slot { width: 74px; padding: 8px 4px; text-align: center; font-size: 12px; background: rgba(0, 20, 0, .8); border: 1px solid #1d5a35; opacity: .55; }
+.slot.on { opacity: 1; border-color: #00ff66; box-shadow: 0 0 12px #00ff66; }
+.slot i { display: block; width: 28px; height: 28px; margin: 0 auto 5px; border: 1px solid #000; }
+#blocker { position: absolute; width: 100%; height: 100%; background: rgba(0, 0, 0, .88); display: flex; justify-content: center; align-items: center; z-index: 20; }
+#instructions { text-align: center; border: 2px solid #00ff66; padding: 40px; background: rgba(0, 20, 0, .95); box-shadow: 0 0 30px rgba(0, 255, 102, .3); max-width: 500px; }
+#instructions h1 { margin-bottom: 15px; font-size: 2.4rem; letter-spacing: 6px; text-shadow: 0 0 12px #00ff66; }
+#instructions p { color: #aaffcc; margin-bottom: 20px; }
+#google-btn, #offline-btn { display: inline-flex; align-items: center; justify-content: center; border: none; border-radius: 4px; padding: 12px 24px; font-size: 16px; cursor: pointer; margin: 4px; transition: background .2s; }
+#google-btn { background: #fff; color: #757575; font-family: Arial, sans-serif; font-weight: 500; box-shadow: 0 2px 4px rgba(0, 0, 0, .25); }
+#google-btn:hover { background: #eee; }
+#google-btn img { width: 20px; height: 20px; margin-right: 12px; }
+#offline-btn { background: transparent; color: #00ff66; border: 1px solid #00ff66; font-family: inherit; }
+#offline-btn:hover { background: rgba(0, 255, 102, .15); }
