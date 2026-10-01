@@ -14,8 +14,8 @@ const db = firebase.database(), fs = firebase.firestore(), auth = firebase.auth(
 const $ = id => document.getElementById(id);
 
 let uid = null, pname = 'Survivor', net = false;
-let hp = 100, scrap = 60, mode = 'combat', sel = 1, nightNo = 0, dayT = 0.2, wasNight = false, spawnCd = 0, hurtCd = 0;
-const remote = {}, blocks = {}, mobs = [], tracers = [];
+let hp = 100, scrap = 60, mode = 'combat', sel = 1, nightNo = 0, dayT = 0.2, logs = 0, doors = 0, wasNight = false, spawnCd = 0, hurtCd = 0;
+const remote = {}, blocks = {}, mobs = [], tracers = [], trunks = [];
 
 function start(id, name, online) {
   uid = id; pname = name; net = online;
@@ -35,14 +35,14 @@ auth.onAuthStateChanged(u => {
   userDoc().get().then(d => {
     const v = d.exists ? d.data() : {};
     if (v.pos) P.set(v.pos.x, Math.max(v.pos.y, H(v.pos.x, v.pos.z) + EYE), v.pos.z);
-    if (v.scrap != null) scrap = v.scrap; if (v.nightNo != null) nightNo = v.nightNo; if (v.dayT != null) dayT = v.dayT;
+    if (v.scrap != null) scrap = v.scrap; if (v.nightNo != null) nightNo = v.nightNo; if (v.logs != null) logs = v.logs; if (v.doors != null) doors = v.doors;
     wasNight = Math.sin(dayT * 6.283) < .62;
   }).catch(() => {}).then(() => {
     loaded = true;
     userDoc().set({ name: pname, email: u.email, photoURL: u.photoURL, lastLogin: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(() => {});
   });
 });
-function save() { if (!loaded) return; userDoc().set({ pos: { x: +P.x.toFixed(2), y: +P.y.toFixed(2), z: +P.z.toFixed(2) }, scrap, nightNo, dayT: +dayT.toFixed(4) }, { merge: true }).catch(() => {}); }
+function save() { if (!loaded) return; userDoc().set({ pos: { x: +P.x.toFixed(2), y: +P.y.toFixed(2), z: +P.z.toFixed(2) }, scrap, nightNo, logs, doors }, { merge: true }).catch(() => {}); }
 addEventListener('pagehide', save); addEventListener('visibilitychange', () => { if (document.hidden) save(); });
 
 // ===== NOISE / TERRAIN HEIGHT =====
@@ -65,7 +65,8 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight); renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
-const composer = new THREE.EffectComposer(renderer);
+const PR = renderer.getPixelRatio();
+const composer = new THREE.EffectComposer(renderer, renderer.capabilities.isWebGL2 ? new THREE.WebGLMultisampleRenderTarget(innerWidth * PR, innerHeight * PR, { format: THREE.RGBAFormat }) : undefined);
 composer.addPass(new THREE.RenderPass(scene, camera));
 composer.addPass(new THREE.UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), .8, .7, .95));
 const grade = new THREE.ShaderPass({ uniforms: { tDiffuse: { value: null }, time: { value: 1 } },
@@ -118,6 +119,10 @@ scene.add(stars);
 const CS = 64, RAD = 2, chunks = {}, tg = new THREE.Group(), mg = new THREE.Group();
 scene.add(tg, mg);
 const terrMat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 });
+const nc = document.createElement('canvas'); nc.width = nc.height = 256; const nx = nc.getContext('2d'), nd = nx.createImageData(256, 256);
+for (let i = 0; i < nd.data.length; i += 4) { const v = 150 + Math.random() * 105 | 0; nd.data[i] = nd.data[i + 1] = nd.data[i + 2] = v; nd.data[i + 3] = 255; } nx.putImageData(nd, 0, 0);
+const dTex = new THREE.CanvasTexture(nc); dTex.wrapS = dTex.wrapT = THREE.RepeatWrapping; dTex.repeat.set(CS / 8, CS / 8); dTex.anisotropy = 8;
+terrMat.map = dTex; terrMat.bumpMap = dTex; terrMat.bumpScale = 1.5;
 const propMats = [new THREE.MeshStandardMaterial({ color: 0x1b1612, roughness: 1 }), new THREE.MeshStandardMaterial({ color: 0x4a4a46, roughness: 1, flatShading: true }),
   new THREE.MeshStandardMaterial({ color: 0x58585a, roughness: .9 }), new THREE.MeshStandardMaterial({ color: 0x33ff88, emissive: 0x22ff77, emissiveIntensity: 2.2 })];
 const propGeo = [new THREE.CylinderGeometry(.18, .3, 1, 6).translate(0, .5, 0), new THREE.DodecahedronGeometry(1).translate(0, .3, 0),
@@ -147,7 +152,7 @@ function makeChunk(i, j) {
       const x = (i - .5 + Math.random()) * CS, z = (j - .5 + Math.random()) * CS; if (Math.hypot(x, z) < 24) continue;
       d.position.set(x, H(x, z) - .2, z); d.rotation.set(0, Math.random() * 6.28, 0); const s = sc(); d.scale.set(...s); d.updateMatrix(); im.setMatrixAt(cnt++, d.matrix);
     }
-    im.count = cnt; im.frustumCulled = false; im.castShadow = true; im.receiveShadow = true; scene.add(im); props.push(im);
+    im.count = cnt; im.frustumCulled = false; im.castShadow = true; im.receiveShadow = true; scene.add(im); props.push(im); if (k === 0) trunks.push(im);
   });
   chunks[i + ',' + j] = { mesh, props };
 }
@@ -155,11 +160,11 @@ function updateChunks() {
   const ci = Math.round(camera.position.x / CS), cj = Math.round(camera.position.z / CS);
   for (let i = ci - RAD; i <= ci + RAD; i++) for (let j = cj - RAD; j <= cj + RAD; j++) if (!chunks[i + ',' + j]) makeChunk(i, j);
   for (const k in chunks) { const [i, j] = k.split(',').map(Number);
-    if (Math.abs(i - ci) > RAD + 1 || Math.abs(j - cj) > RAD + 1) { const c = chunks[k]; tg.remove(c.mesh); c.mesh.geometry.dispose(); c.props.forEach(m => { scene.remove(m); m.dispose(); }); delete chunks[k]; } }
+    if (Math.abs(i - ci) > RAD + 1 || Math.abs(j - cj) > RAD + 1) { const c = chunks[k]; tg.remove(c.mesh); c.mesh.geometry.dispose(); c.props.forEach(m => { scene.remove(m); m.dispose(); const q = trunks.indexOf(m); if (q >= 0) trunks.splice(q, 1); }); delete chunks[k]; } }
 }
 
 // ===== DIGGING =====
-$('hotbar').innerHTML = '<div class="slot" id="s0"><i style="background:#ffcc33"></i>1 GUN<br>&infin;</div><div class="slot" id="s1"><i style="background:#c28a4a"></i>2 SHOVEL<br>&infin;</div>';
+$('hotbar').innerHTML = '<div class="slot" id="s0"><i style="background:#ffcc33"></i>1 GUN<br>&infin;</div><div class="slot" id="s1"><i style="background:#c28a4a"></i>2 SHOVEL<br>&infin;</div><div class="slot" id="s2"><i style="background:#8a5a2b"></i>3 DOOR<br><b id="dn">0</b></div>';
 const dirty = new Set();
 const markDirty = (ix, iz) => { for (const a of [Math.round((ix - .5) / CS), Math.round((ix + .5) / CS)]) for (const b of [Math.round((iz - .5) / CS), Math.round((iz + .5) / CS)]) dirty.add(a + ',' + b); };
 function digAt(px, pz, amt) {
@@ -199,19 +204,20 @@ $('blocker').addEventListener('click', () => { if (uid) controls.lock(); });
 controls.addEventListener('lock', () => { ac = ac || new (window.AudioContext || window.webkitAudioContext)(); $('blocker').style.display = 'none'; });
 controls.addEventListener('unlock', () => { $('blocker').style.display = 'flex'; for (const k in key) delete key[k]; mouseL = mouseR = false; save(); });
 addEventListener('blur', () => { for (const k in key) delete key[k]; mouseL = mouseR = false; });
-addEventListener('wheel', () => { if (controls.isLocked) mode = mode === 'combat' ? 'dig' : 'combat'; });
+const MODES = ['combat', 'dig', 'door'];
+addEventListener('wheel', e => { if (controls.isLocked) mode = MODES[(MODES.indexOf(mode) + (e.deltaY > 0 ? 1 : 2)) % 3]; });
 P.set(0, EYE, 8);
 let vx = 0, vz = 0, vy = 0, ground = true; const key = {};
 addEventListener('keydown', e => {
   key[e.code] = 1;
   if (e.code === 'KeyF') flashOn = !flashOn;
   if (e.code === 'KeyR' && reload <= 0 && ammo < 15) reload = 1.2;
-  if (e.code === 'Digit1') mode = 'combat'; if (e.code === 'Digit2') mode = 'dig';
+  if (e.code === 'Digit1') mode = 'combat'; if (e.code === 'Digit2') mode = 'dig'; if (e.code === 'Digit3') mode = 'door'; if (e.code === 'KeyC') craft(); if (e.code === 'KeyE') openDoor();
   if (e.code === 'Space') e.preventDefault();
   if (e.code === 'Space' && ground) { vy = 13; ground = false; }
 });
 addEventListener('keyup', e => delete key[e.code]);
-const hit = (x, y, z) => { const h = H(x, z); return ground ? h - H(P.x, P.z) > 1.2 * Math.hypot(x - P.x, z - P.z) : h - (y - EYE) > .35; };
+const hit = (x, y, z) => { const h = H(x, z); return ground ? h - H(P.x, P.z) > 1.7 * Math.max(.12, Math.hypot(x - P.x, z - P.z)) : h - (y - EYE) > .35; };
 
 const rc = new THREE.Raycaster();
 const ray = (objs, far) => { rc.far = far; rc.setFromCamera({ x: 0, y: 0 }, camera); return rc.intersectObjects(objs, true); };
@@ -233,6 +239,32 @@ addEventListener('mousedown', e => { if (!controls.isLocked) return; if (e.butto
 addEventListener('mouseup', e => { if (e.button === 0) mouseL = false; if (e.button === 2) mouseR = false; });
 addEventListener('contextmenu', e => e.preventDefault());
 
+// ===== WOOD / TRAPDOOR / BUNKER =====
+const ZERO = new THREE.Matrix4().makeScale(0, 0, 0), chopHits = {}, placed = [];
+const doorMat = new THREE.MeshStandardMaterial({ color: 0x6b4423, roughness: .85 }), barMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, metalness: .8, roughness: .4 });
+const covered = () => placed.some(d => Math.hypot(d.position.x - P.x, d.position.z - P.z) < 1.6 && d.position.y > P.y && d.position.y < P.y + 8);
+function msg(s) { $('status').innerText = s; setTimeout(() => $('status').innerText = net ? 'Online' : 'Offline', 2000); }
+function chop(h) {
+  const im = h.object, id = h.instanceId; if (id == null) return; const k = im.id + '_' + id; sfx(200, .1, 'square', .06, 120);
+  if ((chopHits[k] = (chopHits[k] || 0) + 1) < 3) return;
+  im.setMatrixAt(id, ZERO); im.instanceMatrix.needsUpdate = true; logs += 3;
+}
+function craft() { if (logs >= 4) { logs -= 4; doors++; sfx(300, .15, 'triangle', .06, 200); } else msg('Need 4 wood'); }
+function placeDoor() {
+  if (doors <= 0) return msg('Craft a trapdoor (C)');
+  const h = ray([tg], 6)[0], pit = H0(P.x, P.z) - H(P.x, P.z) >= 2; let x, z, y;
+  if (pit && camera.rotation.x > .5) { x = P.x; z = P.z; y = H0(x, z) + .1; }
+  else if (h) { x = h.point.x; z = h.point.z; y = h.point.y + .08; }
+  else return;
+  const g = new THREE.Group(), add = (w, hh, d, m, px, py) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, hh, d), m); o.position.set(px, py, 0); o.castShadow = o.receiveShadow = true; g.add(o); };
+  add(2.4, .14, 2.4, doorMat, 0, 0); [-.8, 0, .8].forEach(px => add(.06, .16, 2.4, barMat, px, 0)); add(.4, .08, .1, barMat, 0, .1);
+  g.position.set(x, y, z); scene.add(g); placed.push(g); doors--; sfx(120, .15, 'triangle', .08, 70);
+  if (pit && camera.rotation.x > .5) msg('Bunker sealed');
+}
+function openDoor() {
+  let b = null, bd = 3.2; for (const d of placed) { const q = Math.hypot(d.position.x - P.x, d.position.z - P.z); if (q < bd) { bd = q; b = d; } }
+  if (b) { scene.remove(b); placed.splice(placed.indexOf(b), 1); doors++; sfx(150, .12, 'triangle', .06, 90); }
+}
 // ===== MOBS =====
 const eyeMat = new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xff2200, emissiveIntensity: 3 }), bloodMat = new THREE.MeshStandardMaterial({ color: 0x5a0d0d, roughness: .6 });
 const ZT = [{ hp: 30, sp: 2.4, sc: 1, skin: 0x6f8a5a, cloth: 0x3b4a5a, dmg: 8 }, { hp: 18, sp: 5.2, sc: .9, skin: 0x9aa58a, cloth: 0x5a3b3b, dmg: 6 }, { hp: 120, sp: 1.7, sc: 1.45, skin: 0x4a5a45, cloth: 0x2a2a2a, dmg: 22 }];
@@ -267,7 +299,7 @@ function updateMobs(dt, t) {
       const steep = (nx, nz) => H(nx, nz) - y > 1.3 * Math.hypot(nx - px, nz - pz);
       if (!steep(px + sx, pz)) g.position.x += sx; if (!steep(g.position.x, pz + sz)) g.position.z += sz;
       g.position.y = H(g.position.x, g.position.z);
-    } else if (hurtCd <= 0 && Math.abs(P.y - EYE - y) < 2.5) {
+    } else if (hurtCd <= 0 && Math.abs(P.y - EYE - y) < 2.5 && !covered()) {
       hp -= m.dmg; hurtCd = .8; sfx(70, .3, 'square', .1, 40); $('hurt').style.opacity = 1; setTimeout(() => $('hurt').style.opacity = 0, 120);
     }
   }
@@ -279,19 +311,19 @@ function loop() {
   requestAnimationFrame(loop);
   const now = performance.now(), dt = Math.min((now - last) / 1000, .05); last = now; t += dt; shotCd -= dt; hurtCd -= dt;
 
+  dayT = (Date.now() / 1000 / 360) % 1; // shared wall-clock time: same for every player
+  const isNight = Math.sin(dayT * 6.283) < .62;
+  if (isNight && !wasNight) { nightNo++; spawnCd = 0; } wasNight = isNight;
+
   if (controls.isLocked) {
     const f = (key.KeyW ? 1 : 0) - (key.KeyS ? 1 : 0), r = (key.KeyD ? 1 : 0) - (key.KeyA ? 1 : 0), yaw = camera.rotation.y;
     const wx = -Math.sin(yaw) * f + Math.cos(yaw) * r, wz = -Math.cos(yaw) * f - Math.sin(yaw) * r, l = Math.hypot(wx, wz) || 1, spd = (key.ShiftLeft || key.ShiftRight) ? 9 : 5.5, k = Math.min(1, 10 * dt);
     vx += (wx / l * spd - vx) * k; vz += (wz / l * spd - vz) * k;
     if (!hit(P.x + vx * dt, P.y, P.z)) P.x += vx * dt;
     if (!hit(P.x, P.y, P.z + vz * dt)) P.z += vz * dt;
-    vy -= 30 * dt; P.y += vy * dt; const gy = H(P.x, P.z) + EYE; ground = false;
-    if (P.y <= gy) { P.y = gy; vy = 0; ground = true; }
+    vy -= 30 * dt; P.y += vy * dt; const gy = H(P.x, P.z) + EYE;
+    if (vy <= 0 && P.y <= gy + .25) { P.y = gy; vy = 0; ground = true; } else ground = false;
 
-    dayT = (dayT + dt / 360) % 1;
-    const isNight = Math.sin(dayT * 6.283) < .62;
-    if (isNight && !wasNight) { nightNo++; spawnCd = 0; }
-    wasNight = isNight;
     for (let i = mobs.length - 1; i >= 0; i--) if (mobs[i].position.distanceTo(P) > 110) { mg.remove(mobs[i]); mobs.splice(i, 1); }
     if ((spawnCd -= dt) <= 0 && mobs.length < (isNight ? 8 + nightNo * 4 : 2)) { spawnMob(); spawnCd = isNight ? 2 : 12; }
     updateMobs(dt, t);
@@ -314,19 +346,21 @@ function loop() {
   for (let i = tracers.length - 1; i >= 0; i--) { const q = tracers[i]; q.life -= dt; q.l.material.opacity = Math.max(0, q.life / .12); if (q.life <= 0) { scene.remove(q.l); q.l.geometry.dispose(); tracers.splice(i, 1); } }
   for (const id in remote) remote[id].g.position.lerp(remote[id].tp, .2);
 
-  $('scrap').innerText = scrap; $('mode').innerText = mode.toUpperCase();
+  $('scrap').innerText = scrap; $('mode').innerText = mode.toUpperCase() + (covered() ? ' | SAFE' : ''); $('wood').innerText = logs; $('doors').innerText = $('dn').innerText = doors;
   $('hpfill').style.width = Math.max(0, hp) + '%';
   $('clock').innerText = wasNight ? `NIGHT ${nightNo} - MOBS: ${mobs.length}` : `DAY - NIGHT ${nightNo + 1} COMES`;
   $('clock').className = wasNight ? 'warning' : 'success';
   $('s0').className = 'slot' + (mode === 'combat' ? ' on' : '');
-  $('s1').className = 'slot' + (mode === 'dig' ? ' on' : '');
+  $('s1').className = 'slot' + (mode === 'dig' ? ' on' : ''); $('s2').className = 'slot' + (mode === 'door' ? ' on' : '');
   for (let i = 0; i < AN; i++) { const k = i * 3; ap[k] = wrap(ap[k] + (Math.sin(t * .5 + i) * .5 + .8) * dt, P.x); ap[k + 1] = wrap(ap[k + 1] - .7 * dt, P.y); ap[k + 2] = wrap(ap[k + 2] + Math.cos(t * .4 + i) * .4 * dt, P.z); }
   ag.attributes.position.needsUpdate = true; flash.intensity = flashOn ? (1 - day) * 2.5 : 0; grade.uniforms.time.value = (t % 50) + 1;
   digCd -= dt; swing = Math.max(0, swing - dt * 5); shovel.visible = mode === 'dig';
   if (controls.isLocked && mode === 'dig' && (mouseL || mouseR) && digCd <= 0) {
-    const hh = ray([tg], 7)[0]; digCd = .22; swing = 1;
-    if (hh) { digAt(hh.point.x, hh.point.z, mouseL ? -.45 : .45); sfx(110, .12, 'triangle', .06, 55); }
+    const tr = mouseL ? ray(trunks, 4.5)[0] : null, hh = tr ? null : ray([tg], 7)[0]; digCd = .22; swing = 1;
+    if (tr) chop(tr);
+    else if (hh) { digAt(hh.point.x, hh.point.z, mouseL ? -.45 : .45); sfx(110, .12, 'triangle', .06, 55); }
   }
+  if (controls.isLocked && mode === 'door' && mouseL && digCd <= 0) { digCd = .4; placeDoor(); }
   shovel.position.set(.32, -.2, -.65 - swing * .08); shovel.rotation.set(.7 + swing * .6, 0, -.15);
   gun.visible = mode === 'combat'; recoil = Math.max(0, recoil - dt * 9); flashT -= dt; mf.visible = flashT > 0;
   if (reload > 0 && (reload -= dt) <= 0) ammo = 15;
