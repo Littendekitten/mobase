@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Mobase - 3D Wasteland</title>
-  <link rel="icon" type="image/png" href="favicon.png">
   <link rel="icon" href="favicon.ico" sizes="any">
   <link rel="stylesheet" href="style.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -28,6 +27,7 @@
     <p>Status: <span id="status" class="warning">Sign in required</span></p>
     <p>Players: <span id="player-count">0</span></p>
     <p>Scrap: <b id="scrap">0</b> | Mode: <b id="mode">COMBAT</b></p>
+    <p>Ammo: <b id="ammo">15/15</b></p>
     <p id="clock">DAY</p>
     <div id="hpbar"><div id="hpfill"></div></div>
   </div>
@@ -36,6 +36,7 @@
 
   <div id="blocker">
     <div id="instructions">
+      <img id="logo" src="favicon.png" alt="Mobase logo">
       <h1>MOBASE</h1>
       <p id="login-subtext">Survive the night. Build a base. Hold the line.</p>
       <button id="google-btn">
@@ -46,9 +47,10 @@
         <p style="color:#00ff66; margin-bottom:10px;"><b>CLICK TO ENTER</b></p>
         <p style="font-size:.85rem; color:#aaffcc; line-height:1.6;">
           <b>WASD</b> walk | <b>SHIFT</b> sprint | <b>SPACE</b> jump<br>
-          <b>F</b> flashlight | <b>Q</b> combat/build | <b>1-4</b> wall, steel, lamp, turret<br>
-          <b>LEFT</b> shoot / place | <b>RIGHT</b> remove (yours)<br>
-          Mobs come at night. Kill them for scrap.
+          <b>1</b> gun (hold LEFT to fire, <b>R</b> reload)<br>
+          <b>2-5</b> wall, steel, lamp, turret | <b>WHEEL</b> switch<br>
+          <b>LEFT</b> place | <b>RIGHT</b> remove yours | <b>F</b> flashlight<br>
+          Zombies come at night. Kill them for scrap.
         </p>
       </div>
     </div>
