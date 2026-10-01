@@ -111,7 +111,8 @@ sp2(new THREE.CylinderGeometry(.022, .022, .8, 8), wood, 0, 0, 0); sp2(new THREE
 shovel.traverse(o => { o.renderOrder = 999; o.frustumCulled = false; if (o.material) o.material.depthTest = false; });
 camera.add(shovel);
 gun.position.set(.28, -.26, -.55); camera.add(gun);
-let ac = null; const sfx = (f, d, ty = 'sawtooth', v = .08, f2 = f * .5) => { if (!ac) return; const o = ac.createOscillator(), g = ac.createGain(), n = ac.currentTime; o.type = ty; o.frequency.setValueAtTime(f, n); o.frequency.exponentialRampToValueAtTime(Math.max(20, f2), n + d); g.gain.setValueAtTime(v, n); g.gain.exponentialRampToValueAtTime(.001, n + d); o.connect(g); g.connect(ac.destination); o.start(); o.stop(n + d); };
+let ac = null; const SOUND = false; // set true to bring the beeps back
+const sfx = (f, d, ty = 'sawtooth', v = .08, f2 = f * .5) => { if (!SOUND || !ac) return; const o = ac.createOscillator(), g = ac.createGain(), n = ac.currentTime; o.type = ty; o.frequency.setValueAtTime(f, n); o.frequency.exponentialRampToValueAtTime(Math.max(20, f2), n + d); g.gain.setValueAtTime(v, n); g.gain.exponentialRampToValueAtTime(.001, n + d); o.connect(g); g.connect(ac.destination); o.start(); o.stop(n + d); };
 const sp = []; for (let i = 0; i < 900; i++) { const a = Math.random() * 6.283, e = Math.acos(Math.random()); sp.push(Math.cos(a) * Math.sin(e) * 420, Math.cos(e) * 420, Math.sin(a) * Math.sin(e) * 420); }
 const sg = new THREE.BufferGeometry(); sg.setAttribute('position', new THREE.Float32BufferAttribute(sp, 3));
 const stars = new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xffffff, size: 1.6, sizeAttenuation: false, transparent: true, fog: false, depthWrite: false }));
@@ -282,8 +283,10 @@ function doorTarget() {
 function placeDoor() {
   if (doors <= 0) return msg('Craft a trapdoor (C)');
   const t = doorTarget(); if (!t) return; doors--; const { big, ...data } = t; sfx(120, .15, 'triangle', .08, 70);
-  if (net) db.ref('doors').push(data).catch(() => {}); else addDoor('l' + Date.now(), data);
   msg(big ? 'Pit bigger than max door size' : data.w > 3 ? 'Pit covered' : 'Trapdoor placed');
+  if (net) { const r = db.ref('doors').push(); addDoor(r.key, data); // show it instantly, then save it for everyone
+    r.set(data).catch(() => setTimeout(() => { addDoor(r.key, data); msg('Placed, but NOT saved (Firebase rules block /doors)'); }, 60)); }
+  else addDoor('l' + Date.now(), data);
 }
 function addDoor(key, v) {
   if (placed.some(u => u.key === key)) return;
@@ -294,7 +297,7 @@ function addDoor(key, v) {
 function removeDoor(key) { const n = placed.findIndex(u => u.key === key); if (n >= 0) { scene.remove(placed[n].g); placed.splice(n, 1); } }
 function openDoor() {
   let b = null, bd = 1e9; for (const u of placed) if (inRect(u, P.x, P.z, 2.5)) { const q = Math.hypot(u.x - P.x, u.z - P.z); if (q < bd) { bd = q; b = u; } }
-  if (!b) return; doors++; sfx(150, .12, 'triangle', .06, 90); if (net) db.ref('doors/' + b.key).remove().catch(() => {}); else removeDoor(b.key);
+  if (!b) return; doors++; sfx(150, .12, 'triangle', .06, 90); removeDoor(b.key); if (net) db.ref('doors/' + b.key).remove().catch(() => {});
 }
 // see-through preview of where the trapdoor will go
 const ghost = new THREE.Group(), gbox = new THREE.BoxGeometry(1, 1, 1), gm = new THREE.Mesh(gbox, new THREE.MeshBasicMaterial({ color: 0x00ff66, transparent: true, opacity: .22, depthWrite: false })), ge = new THREE.LineSegments(new THREE.EdgesGeometry(gbox), new THREE.LineBasicMaterial({ color: 0x00ff66 }));
