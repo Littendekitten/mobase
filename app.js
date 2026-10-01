@@ -62,7 +62,7 @@ const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x8a7d62, 0.014);
 const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 1000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(innerWidth, innerHeight); renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight); renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
 const PR = renderer.getPixelRatio();
@@ -157,8 +157,8 @@ function makeChunk(i, j) {
   chunks[i + ',' + j] = { mesh, props };
 }
 function updateChunks() {
-  const ci = Math.round(camera.position.x / CS), cj = Math.round(camera.position.z / CS);
-  for (let i = ci - RAD; i <= ci + RAD; i++) for (let j = cj - RAD; j <= cj + RAD; j++) if (!chunks[i + ',' + j]) makeChunk(i, j);
+  let made = 0; const ci = Math.round(camera.position.x / CS), cj = Math.round(camera.position.z / CS);
+  for (let i = ci - RAD; i <= ci + RAD; i++) for (let j = cj - RAD; j <= cj + RAD; j++) if (!chunks[i + ',' + j] && !made) { makeChunk(i, j); made = 1; }
   for (const k in chunks) { const [i, j] = k.split(',').map(Number);
     if (Math.abs(i - ci) > RAD + 1 || Math.abs(j - cj) > RAD + 1) { const c = chunks[k]; tg.remove(c.mesh); c.mesh.geometry.dispose(); c.props.forEach(m => { scene.remove(m); m.dispose(); const q = trunks.indexOf(m); if (q >= 0) trunks.splice(q, 1); }); delete chunks[k]; } }
 }
@@ -217,7 +217,7 @@ addEventListener('keydown', e => {
   if (e.code === 'Space' && ground) { vy = 13; ground = false; }
 });
 addEventListener('keyup', e => delete key[e.code]);
-const hit = (x, y, z) => { const h = H(x, z); return ground ? h - H(P.x, P.z) > 1.7 * Math.max(.12, Math.hypot(x - P.x, z - P.z)) : h - (y - EYE) > .35; };
+const hit = (x, z) => H(x, z) - (P.y - EYE) > (ground ? 2.2 * Math.hypot(x - P.x, z - P.z) + .03 : .35);
 
 const rc = new THREE.Raycaster();
 const ray = (objs, far) => { rc.far = far; rc.setFromCamera({ x: 0, y: 0 }, camera); return rc.intersectObjects(objs, true); };
@@ -319,10 +319,13 @@ function loop() {
     const f = (key.KeyW ? 1 : 0) - (key.KeyS ? 1 : 0), r = (key.KeyD ? 1 : 0) - (key.KeyA ? 1 : 0), yaw = camera.rotation.y;
     const wx = -Math.sin(yaw) * f + Math.cos(yaw) * r, wz = -Math.cos(yaw) * f - Math.sin(yaw) * r, l = Math.hypot(wx, wz) || 1, spd = (key.ShiftLeft || key.ShiftRight) ? 9 : 5.5, k = Math.min(1, 10 * dt);
     vx += (wx / l * spd - vx) * k; vz += (wz / l * spd - vz) * k;
-    if (!hit(P.x + vx * dt, P.y, P.z)) P.x += vx * dt;
-    if (!hit(P.x, P.y, P.z + vz * dt)) P.z += vz * dt;
-    vy -= 30 * dt; P.y += vy * dt; const gy = H(P.x, P.z) + EYE;
-    if (vy <= 0 && P.y <= gy + .25) { P.y = gy; vy = 0; ground = true; } else ground = false;
+    const steps = Math.ceil(dt / .008), sdt = dt / steps; // small fixed sub-steps: same feel at any FPS
+    for (let n = 0; n < steps; n++) {
+      const nx = P.x + vx * sdt; if (!hit(nx, P.z)) P.x = nx;
+      const nz = P.z + vz * sdt; if (!hit(P.x, nz)) P.z = nz;
+      vy -= 30 * sdt; P.y += vy * sdt; const gy = H(P.x, P.z) + EYE;
+      if (vy <= 0 && P.y <= gy + (ground ? .5 : 0)) { P.y = gy; vy = 0; ground = true; } else ground = false;
+    }
 
     for (let i = mobs.length - 1; i >= 0; i--) if (mobs[i].position.distanceTo(P) > 110) { mg.remove(mobs[i]); mobs.splice(i, 1); }
     if ((spawnCd -= dt) <= 0 && mobs.length < (isNight ? 8 + nightNo * 4 : 2)) { spawnMob(); spawnCd = isNight ? 2 : 12; }
