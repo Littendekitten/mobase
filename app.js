@@ -1,17 +1,19 @@
-// 1. FIREBASE CONFIGURATION
+// 1. YOUR FIREBASE CONFIGURATION
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  databaseURL: "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyAx_y1CrS6QOrgM1nyapiGomPzpylq6_RE",
+  authDomain: "kitacat-mobase.firebaseapp.com",
+  databaseURL: "https://kitacat-mobase-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "kitacat-mobase",
+  storageBucket: "kitacat-mobase.firebasestorage.app",
+  messagingSenderId: "732220884685",
+  appId: "1:732220884685:web:c62afbc193aef6abebcb84",
+  measurementId: "G-6LRWS8CS5F"
 };
 
+// Initialize Firebase
 firebase.initializeApp(firebaseConfig);
-const db = firebase.database();       // Realtime Database for 3D Movement & Bases
-const fs = firebase.firestore();      // Firestore for Player Profiles & Accounts
+const db = firebase.database();  // Realtime Database for high-speed positions & bases
+const fs = firebase.firestore(); // Firestore for user profiles
 const auth = firebase.auth();
 
 let localUid = null;
@@ -34,7 +36,7 @@ auth.onAuthStateChanged((user) => {
     localUid = user.uid;
     localDisplayName = user.displayName || "Survivor";
 
-    // Update UI
+    // Update UI elements
     document.getElementById('player-name').innerText = localDisplayName;
     document.getElementById('status').innerText = "Online";
     document.getElementById('status').className = "success";
@@ -43,7 +45,7 @@ auth.onAuthStateChanged((user) => {
     document.getElementById('controls-info').style.display = "block";
     document.getElementById('blocker').style.cursor = "pointer";
 
-    // Save/Update Profile in Firestore
+    // Save profile to Firestore
     fs.collection('users').doc(localUid).set({
       name: localDisplayName,
       email: user.email,
@@ -51,28 +53,31 @@ auth.onAuthStateChanged((user) => {
       lastLogin: firebase.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
 
-    // Start Realtime Networking
+    // Start 3D Multiplayer Sync
     initMultiplayer();
   }
 });
 
-// 3. THREE.JS SCENE SETUP
+// 3. THREE.JS GRAPHICS SETUP
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0a0f0d);
-scene.fog = new THREE.FogExp2(0x0a0f0d, 0.02);
+scene.fog = new THREE.FogExp2(0x0a0f0d, 0.015);
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
 
+// Lighting
 scene.add(new THREE.AmbientLight(0xffffff, 0.3));
-const dirLight = new THREE.DirectionalLight(0x00ff66, 1);
+const dirLight = new THREE.DirectionalLight(0x00ff66, 0.9);
 dirLight.position.set(50, 100, 50);
 dirLight.castShadow = true;
 scene.add(dirLight);
 
+// Floor & Grid
 const floorMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 });
 const floor = new THREE.Mesh(new THREE.PlaneGeometry(500, 500), floorMat);
 floor.rotation.x = -Math.PI / 2;
@@ -100,6 +105,7 @@ document.addEventListener('keydown', (e) => {
   if(e.code === 'KeyD') moveRight = true;
   if(e.code === 'Space' && camera.position.y <= 2) velocity.y += 12;
 });
+
 document.addEventListener('keyup', (e) => {
   if(e.code === 'KeyW') moveForward = false;
   if(e.code === 'KeyS') moveBackward = false;
@@ -108,7 +114,7 @@ document.addEventListener('keyup', (e) => {
 });
 camera.position.y = 2;
 
-// 5. BASE BUILDING (CLICK TO PLACE WALL)
+// 5. BASE BUILDING MECHANICS
 const raycaster = new THREE.Raycaster();
 window.addEventListener('pointerdown', (e) => {
   if (!controls.isLocked || e.button !== 0) return;
@@ -120,15 +126,20 @@ window.addEventListener('pointerdown', (e) => {
     const hit = intersects[0];
     const target = hit.point.clone().add(hit.face.normal);
     
+    // Grid snap (2x2 units)
     const x = Math.round(target.x / 2) * 2;
     const y = Math.max(1, Math.round(target.y / 2) * 2);
     const z = Math.round(target.z / 2) * 2;
 
-    db.ref(`bases/${x}_${y}_${z}`).set({ x, y, z, owner: localUid, ownerName: localDisplayName });
+    db.ref(`bases/${x}_${y}_${z}`).set({
+      x, y, z, 
+      owner: localUid, 
+      ownerName: localDisplayName 
+    });
   }
 });
 
-// Sync Blocks from RTDB
+// Render base blocks from Realtime Database
 db.ref('bases').on('child_added', (snapshot) => {
   const data = snapshot.val();
   const mat = new THREE.MeshStandardMaterial({ color: 0x334433, roughness: 0.6 });
@@ -140,11 +151,12 @@ db.ref('bases').on('child_added', (snapshot) => {
   placedBlocks[snapshot.key] = mesh;
 });
 
-// 6. REALTIME MULTIPLAYER SYNC
+// 6. MULTIPLAYER NETWORKING
 function initMultiplayer() {
   const userRef = db.ref(`players/${localUid}`);
   userRef.onDisconnect().remove();
 
+  // Send position update every 100ms
   setInterval(() => {
     if (!controls.isLocked) return;
     userRef.set({
@@ -166,7 +178,7 @@ db.ref('players').on('child_added', (snap) => {
   mesh.castShadow = true;
   scene.add(mesh);
   remotePlayers[snap.key] = { mesh, targetPos: new THREE.Vector3(), targetRotY: 0 };
-  document.getElementById('player-count').innerText = Object.keys(remotePlayers).length + 1;
+  updatePlayerCount();
 });
 
 db.ref('players').on('child_changed', (snap) => {
@@ -180,11 +192,15 @@ db.ref('players').on('child_removed', (snap) => {
   if (remotePlayers[snap.key]) {
     scene.remove(remotePlayers[snap.key].mesh);
     delete remotePlayers[snap.key];
-    document.getElementById('player-count').innerText = Object.keys(remotePlayers).length + 1;
+    updatePlayerCount();
   }
 });
 
-// 7. RENDER LOOP
+function updatePlayerCount() {
+  document.getElementById('player-count').innerText = Object.keys(remotePlayers).length + 1;
+}
+
+// 7. GAME LOOP
 function animate() {
   requestAnimationFrame(animate);
   const delta = (performance.now() - prevTime) / 1000;
@@ -193,7 +209,7 @@ function animate() {
   if (controls.isLocked) {
     velocity.x -= velocity.x * 10.0 * delta;
     velocity.z -= velocity.z * 10.0 * delta;
-    velocity.y -= 30.0 * delta;
+    velocity.y -= 30.0 * delta; // Gravity
 
     direction.z = Number(moveForward) - Number(moveBackward);
     direction.x = Number(moveRight) - Number(moveLeft);
@@ -209,6 +225,7 @@ function animate() {
     if (camera.position.y < 2) { velocity.y = 0; camera.position.y = 2; }
   }
 
+  // Smooth remote player interpolation
   for (let id in remotePlayers) {
     const p = remotePlayers[id];
     p.mesh.position.lerp(p.targetPos, 0.2);
