@@ -10,13 +10,15 @@ const firebaseConfig = {
   measurementId: "G-6LRWS8CS5F"
 };
 firebase.initializeApp(firebaseConfig);
+const SERVER_URL = ''; // <-- paste your Render URL here after deploying, e.g. 'https://mobase-server.onrender.com' (wakes the free server when you open the game)
 const db = firebase.database(), fs = firebase.firestore(), auth = firebase.auth();
 const $ = id => document.getElementById(id);
 
 let uid = null, pname = 'Survivor', net = false;
 let hp = 100, scrap = 60, mode = 'combat', sel = 1, nightNo = 0, dayT = 0.2, logs = 0, doors = 0, wasNight = false, spawnCd = 0, hurtCd = 0;
 const remote = {}, blocks = {}, mobs = [], tracers = [], trunks = [], choppedSet = new Set(), mobById = {};
-let isHost = true, netMobs = {}, mobSeq = 0, pubT = 0, lastK = null;
+let netMobs = {}, hbLast = 0, chatting = false, tpInit = false, msgInit = false, msgUntil = 0;
+const act = o => db.ref('actions').push({ uid, ...o }).catch(() => {}); // the ONLY way the client changes the world: ask the server
 
 function start(id, name, online) {
   uid = id; pname = name; net = online;
@@ -36,14 +38,13 @@ auth.onAuthStateChanged(u => {
   userDoc().get().then(d => {
     const v = d.exists ? d.data() : {};
     if (v.pos) P.set(v.pos.x, Math.max(v.pos.y, H(v.pos.x, v.pos.z) + EYE), v.pos.z);
-    if (v.scrap != null) scrap = v.scrap; if (v.logs != null) logs = v.logs; if (v.doors != null) doors = v.doors;
     wasNight = Math.sin(dayT * 6.283) < .62;
   }).catch(() => {}).then(() => {
     loaded = true;
     userDoc().set({ name: pname, email: u.email, photoURL: u.photoURL, lastLogin: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(() => {});
   });
 });
-function save() { if (!loaded) return; userDoc().set({ pos: { x: +P.x.toFixed(2), y: +P.y.toFixed(2), z: +P.z.toFixed(2) }, scrap, nightNo, logs, doors }, { merge: true }).catch(() => {}); }
+function save() { if (!loaded) return; userDoc().set({ pos: { x: +P.x.toFixed(2), y: +P.y.toFixed(2), z: +P.z.toFixed(2) } }, { merge: true }).catch(() => {}); }
 addEventListener('pagehide', save); addEventListener('visibilitychange', () => { if (document.hidden) save(); });
 
 // ===== NOISE / TERRAIN HEIGHT =====
@@ -172,29 +173,26 @@ function updateChunks() {
 $('hotbar').innerHTML = '<div class="slot" id="s0"><i style="background:#ffcc33"></i>1 GUN<br>&infin;</div><div class="slot" id="s1"><i style="background:#c28a4a"></i>2 SHOVEL<br>&infin;</div><div class="slot" id="s2"><i style="background:#8a5a2b"></i>3 DOOR<br><b id="dn">0</b></div>';
 const dirty = new Set();
 const markDirty = (ix, iz) => { for (const a of [Math.round((ix - .5) / CS), Math.round((ix + .5) / CS)]) for (const b of [Math.round((iz - .5) / CS), Math.round((iz + .5) / CS)]) dirty.add(a + ',' + b); };
-function digAt(px, pz, amt) {
-  const R = 2.6, up = {};
-  for (let ix = Math.floor(px - R); ix <= Math.ceil(px + R); ix++) for (let iz = Math.floor(pz - R); iz <= Math.ceil(pz + R); iz++) {
-    const d = Math.hypot(ix - px, iz - pz); if (d > R) continue;
-    const k = ix + ',' + iz, v = Math.min(1.5, Math.max(-24, (dg[k] || 0) + amt * (.3 + .7 * (1 - d / R))));
-    if (!(k in dg)) dn++; dg[k] = v; markDirty(ix, iz); up[ix + '_' + iz] = +v.toFixed(2);
-  }
-  db.ref('holes').update(up).catch(() => {});
-}
+function digAt(px, pz, amt) { act({ t: 'dig', x: +px.toFixed(2), z: +pz.toFixed(2), a: amt > 0 ? .45 : -.45 }); } // server edits the terrain, then everyone receives it
 
 // ===== MULTIPLAYER =====
 function initNet() {
-  db.ref('bases').remove().catch(() => {}); // wipe leftover blocks from old versions
+  hbLast = performance.now();
+  const wake = () => { if (SERVER_URL) fetch(SERVER_URL.replace(/\/$/, '') + '/ping', { mode: 'no-cors' }).catch(() => {}); }; wake(); setInterval(wake, 4 * 60 * 1000); // Render free servers sleep after 15 min without visitors
   const onHole = s => { const v = s.val(), [ix, iz] = s.key.split('_').map(Number), k = ix + ',' + iz; if (dg[k] === v) return; if (!(k in dg)) dn++; dg[k] = v; markDirty(ix, iz); };
   db.ref('holes').on('child_added', onHole); db.ref('holes').on('child_changed', onHole);
   db.ref('chopped').on('child_added', s => { choppedSet.add(s.key); applyChop(s.key); });
   db.ref('doors').on('child_added', s => addDoor(s.key, s.val())); db.ref('doors').on('child_removed', s => removeDoor(s.key));
   db.ref('world/night').on('value', s => { nightNo = s.val() || 0; });
-  db.ref('kills/' + uid).on('value', s => { const v = s.val() || 0; if (lastK !== null && v > lastK) scrap += v - lastK; lastK = v; });
+  db.ref('world/hb').on('value', () => { hbLast = performance.now(); });
+  db.ref('inv/' + uid).on('value', s => { const v = s.val() || {}; logs = v.logs || 0; doors = v.doors || 0; scrap = v.scrap || 0; });
+  db.ref('stats/' + uid).on('value', s => { const v = s.val(); if (!v) return; if (v.hp < hp) { $('hurt').style.opacity = 1; setTimeout(() => $('hurt').style.opacity = 0, 120); } hp = v.hp; });
+  db.ref('tp/' + uid).on('value', s => { const v = s.val(); if (!tpInit) { tpInit = true; return; } if (v) { P.set(v.x, Math.max(v.y, H(v.x, v.z)) + EYE + .3, v.z); vx = vz = vy = 0; } });
+  db.ref('msgs/' + uid).on('value', s => { const v = s.val(); if (!msgInit) { msgInit = true; return; } if (v) addChat(v.text, 'sys'); });
+  db.ref('chat').limitToLast(30).on('child_added', s => { const v = s.val(); addChat(v.name + ': ' + v.text); });
   db.ref('mobs').on('value', s => { netMobs = s.val() || {}; syncMobs(); });
-  db.ref('mobhits').on('child_added', s => { if (!isHost) return; const v = s.val(); s.ref.remove(); applyHit(v.id, v.d, v.by); });
   const me = db.ref('players/' + uid); me.onDisconnect().remove();
-  setInterval(() => { if (controls.isLocked) me.set({ name: pname, x: camera.position.x, y: camera.position.y, z: camera.position.z }); }, 100);
+  setInterval(() => { if (controls.isLocked) me.set({ name: pname, x: camera.position.x, y: camera.position.y, z: camera.position.z, t: Date.now() }); }, 100);
   db.ref('players').on('child_added', s => {
     if (s.key === uid) return; const d = s.val(), g = new THREE.Group();
     const body = new THREE.Mesh(new THREE.CylinderGeometry(.35, .35, 1.2, 10), new THREE.MeshStandardMaterial({ color: 0xff0055, emissive: 0x550022 })); body.position.y = .6;
@@ -209,17 +207,32 @@ function initNet() {
   db.ref('players').on('child_removed', s => { if (remote[s.key]) { scene.remove(remote[s.key].g); delete remote[s.key]; $('player-count').innerText = Object.keys(remote).length + 1; } });
 }
 
+// ===== CHAT =====
+const chatIn = $('chatin'), chatLog = $('chatlog');
+function addChat(text, cls) {
+  for (const line of String(text).split('\n')) { const d = document.createElement('div'); d.className = 'cl ' + (cls || ''); d.textContent = line; chatLog.appendChild(d); }
+  while (chatLog.children.length > 14) chatLog.removeChild(chatLog.firstChild); chatLog.scrollTop = 1e6;
+}
+function openChat(pre) { chatting = true; controls.unlock(); chatIn.style.display = 'block'; chatIn.value = pre || ''; chatIn.focus(); chatLog.classList.add('open'); }
+function closeChat() { chatting = false; chatIn.style.display = 'none'; chatIn.blur(); chatLog.classList.remove('open'); }
+chatIn.addEventListener('keydown', e => { e.stopPropagation();
+  if (e.key === 'Enter') { const v = chatIn.value.trim(); if (v) act({ t: 'chat', text: v.slice(0, 200) }); closeChat(); controls.lock(); }
+  else if (e.key === 'Escape') { closeChat(); $('blocker').style.display = 'flex'; } });
+document.addEventListener('pointerlockerror', () => { $('blocker').style.display = 'flex'; });
+
 // ===== CONTROLS / PHYSICS =====
 const controls = new THREE.PointerLockControls(camera, document.body), P = camera.position, EYE = 1.6, R = .35;
 $('blocker').addEventListener('click', () => { if (uid) controls.lock(); });
 controls.addEventListener('lock', () => { ac = ac || new (window.AudioContext || window.webkitAudioContext)(); $('blocker').style.display = 'none'; });
-controls.addEventListener('unlock', () => { $('blocker').style.display = 'flex'; for (const k in key) delete key[k]; mouseL = mouseR = false; save(); });
+controls.addEventListener('unlock', () => { $('blocker').style.display = chatting ? 'none' : 'flex'; for (const k in key) delete key[k]; mouseL = mouseR = false; save(); });
 addEventListener('blur', () => { for (const k in key) delete key[k]; mouseL = mouseR = false; });
 const MODES = ['combat', 'dig', 'door'];
 addEventListener('wheel', e => { if (controls.isLocked) mode = MODES[(MODES.indexOf(mode) + (e.deltaY > 0 ? 1 : 2)) % 3]; });
 P.set(0, EYE, 8);
 let vx = 0, vz = 0, vy = 0, ground = true; const key = {};
 addEventListener('keydown', e => {
+  if (chatting) return;
+  if (controls.isLocked && (e.code === 'Enter' || e.code === 'KeyT' || e.code === 'Slash')) { e.preventDefault(); openChat(e.code === 'Slash' ? '/' : ''); return; }
   key[e.code] = 1;
   if (e.code === 'KeyF') flashOn = !flashOn;
   if (e.code === 'KeyR' && reload <= 0 && ammo < 15) reload = 1.2;
@@ -256,14 +269,10 @@ const doorMat = new THREE.MeshStandardMaterial({ color: 0x6b4423, roughness: .85
 const inRect = (u, x, z, m = 0) => Math.abs(x - u.x) < u.w / 2 + m && Math.abs(z - u.z) < u.d / 2 + m;
 const covered = () => placed.some(u => inRect(u, P.x, P.z) && u.y > P.y);
 const doorBlock = (x, z) => placed.some(u => inRect(u, x, z, .5));
-function msg(s) { $('status').innerText = s; setTimeout(() => $('status').innerText = net ? 'Online' : 'Offline', 2000); }
+function msg(s) { $('status').innerText = s; msgUntil = performance.now() + 2000; }
 function applyChop(key) { const [i, j] = key.split('_'), c = chunks[i + ',' + j]; if (!c) return; const im = c.props[0], n = im.userData.ids.indexOf(key); if (n >= 0) { im.setMatrixAt(n, ZERO); im.instanceMatrix.needsUpdate = true; } }
-function chop(h) {
-  const im = h.object, id = h.instanceId; if (id == null) return; const key = im.userData.ids[id]; sfx(200, .1, 'square', .06, 120);
-  if ((chopHits[key] = (chopHits[key] || 0) + 1) < 3) return;
-  choppedSet.add(key); applyChop(key); logs += 3; if (net) db.ref('chopped/' + key).set(1).catch(() => {});
-}
-function craft() { if (logs >= 4) { logs -= 4; doors++; sfx(300, .15, 'triangle', .06, 200); } else msg('Need 4 wood'); }
+function chop(h) { const im = h.object, id = h.instanceId; if (id != null) act({ t: 'chop', key: im.userData.ids[id] }); } // server counts hits, gives wood, saves the tree as chopped
+function craft() { act({ t: 'craft' }); }
 // where would a trapdoor go? Stretches over the whole pit (up to MAXS wide), otherwise a small 2.4 door.
 function doorTarget() {
   const inPit = H0(P.x, P.z) - H(P.x, P.z) >= 2 && camera.rotation.x > .5; let cx, cz;
@@ -278,15 +287,11 @@ function doorTarget() {
   }
   const w = Math.min(MAXS, x1 - x0), d = Math.min(MAXS, z1 - z0), x = (x0 + x1) / 2, z = (z0 + z1) / 2; let y = -1e9;
   for (const fx of [-.5, 0, .5]) for (const fz of [-.5, 0, .5]) y = Math.max(y, H0(x + fx * w, z + fz * d));
-  return { x: +x.toFixed(2), y: +(y + .1).toFixed(2), z: +z.toFixed(2), w: +w.toFixed(2), d: +d.toFixed(2), big: x1 - x0 > MAXS || z1 - z0 > MAXS };
+  return { cx, cz, x: +x.toFixed(2), y: +(y + .1).toFixed(2), z: +z.toFixed(2), w: +w.toFixed(2), d: +d.toFixed(2), big: x1 - x0 > MAXS || z1 - z0 > MAXS };
 }
 function placeDoor() {
   if (doors <= 0) return msg('Craft a trapdoor (C)');
-  const t = doorTarget(); if (!t) return; doors--; const { big, ...data } = t; sfx(120, .15, 'triangle', .08, 70);
-  msg(big ? 'Pit bigger than max door size' : data.w > 3 ? 'Pit covered' : 'Trapdoor placed');
-  if (net) { const r = db.ref('doors').push(); addDoor(r.key, data); // show it instantly, then save it for everyone
-    r.set(data).catch(() => setTimeout(() => { addDoor(r.key, data); msg('Placed, but NOT saved (Firebase rules block /doors)'); }, 60)); }
-  else addDoor('l' + Date.now(), data);
+  const t = doorTarget(); if (!t) return; act({ t: 'door', cx: +t.cx.toFixed(2), cz: +t.cz.toFixed(2) }); // server fits it to the pit and places it
 }
 function addDoor(key, v) {
   if (placed.some(u => u.key === key)) return;
@@ -295,10 +300,7 @@ function addDoor(key, v) {
   add(.4, .08, .1, barMat, 0).position.y = .1; g.position.set(v.x, v.y, v.z); scene.add(g); placed.push({ key, x: v.x, y: v.y, z: v.z, w: v.w, d: v.d, g });
 }
 function removeDoor(key) { const n = placed.findIndex(u => u.key === key); if (n >= 0) { scene.remove(placed[n].g); placed.splice(n, 1); } }
-function openDoor() {
-  let b = null, bd = 1e9; for (const u of placed) if (inRect(u, P.x, P.z, 2.5)) { const q = Math.hypot(u.x - P.x, u.z - P.z); if (q < bd) { bd = q; b = u; } }
-  if (!b) return; doors++; sfx(150, .12, 'triangle', .06, 90); removeDoor(b.key); if (net) db.ref('doors/' + b.key).remove().catch(() => {});
-}
+function openDoor() { act({ t: 'open' }); }
 // see-through preview of where the trapdoor will go
 const ghost = new THREE.Group(), gbox = new THREE.BoxGeometry(1, 1, 1), gm = new THREE.Mesh(gbox, new THREE.MeshBasicMaterial({ color: 0x00ff66, transparent: true, opacity: .22, depthWrite: false })), ge = new THREE.LineSegments(new THREE.EdgesGeometry(gbox), new THREE.LineBasicMaterial({ color: 0x00ff66 }));
 ghost.add(gm, ge); ghost.visible = false; scene.add(ghost); let ghostT = 0, gt = null;
@@ -325,60 +327,24 @@ function buildMob(ty) {
   g.scale.setScalar(Z.sc); g.userData.mob = { hp: Z.hp, sp: Z.sp, dmg: Z.dmg, ph: Math.random() * 6, ty, head, A, L };
   return g;
 }
-function spawnMob(p) {
-  const a = Math.random() * 6.283, r = 40 + Math.random() * 20, x = p.x + Math.cos(a) * r, z = p.z + Math.sin(a) * r;
-  const ty = Math.random() < .08 + nightNo * .03 ? 2 : Math.random() < .3 ? 1 : 0, g = buildMob(ty), m = g.userData.mob, Z = ZT[ty];
-  m.hp = Z.hp * (1 + nightNo * .15); m.sp = Z.sp * (.9 + Math.random() * .2); m.dmg = Z.dmg + nightNo;
-  g.userData.id = 'm' + Date.now().toString(36) + (mobSeq++); g.position.set(x, H(x, z), z); mg.add(g); mobs.push(g); mobById[g.userData.id] = g; sfx(80 + Math.random() * 40, .9, 'sawtooth', .04, 45);
-}
 function killMob(g) {
-  const n = mobs.indexOf(g); if (n < 0) return; delete mobById[g.userData.id]; g.userData.mob = null; g.userData.dead = 3; mobs.splice(n, 1); corpses.push(g); sfx(140, .5, 'sawtooth', .07, 35);
+  const n = mobs.indexOf(g); if (n < 0) return; delete mobById[g.userData.id]; g.userData.mob = null; g.userData.dead = 3; mobs.splice(n, 1); corpses.push(g);
 }
-function dropMob(g) { const n = mobs.indexOf(g); if (n >= 0) mobs.splice(n, 1); delete mobById[g.userData.id]; mg.remove(g); }
-function applyHit(id, d, by) { // runs on the host only
-  const g = mobById[id], m = g && g.userData.mob; if (!m) return; m.hp -= d; sfx(160, .15, 'square', .05, 80);
-  if (m.hp <= 0) { killMob(g); if (net) db.ref('kills/' + by).transaction(n => (n || 0) + 1).catch(() => {}); else scrap++; }
-}
-function hurtMob(g, d) { if (!g.userData.mob) return; if (!net || isHost) applyHit(g.userData.id, d, uid); else { sfx(160, .15, 'square', .05, 80); db.ref('mobhits').push({ id: g.userData.id, d, by: uid }).catch(() => {}); } }
-function syncMobs() { // non-host: mirror the host's zombies
-  if (isHost) return;
+function hurtMob(g) { if (g.userData.mob) act({ t: 'hit', id: g.userData.id }); } // server checks range + fire rate and applies the damage
+function syncMobs() { // zombies live on the server; we only draw them
   for (const id in netMobs) { const v = netMobs[id]; let g = mobById[id];
     if (!g) { g = buildMob(v.t); g.userData.id = id; g.position.set(v.x, H(v.x, v.z), v.z); mobById[id] = g; mg.add(g); mobs.push(g); }
-    const m = g.userData.mob; if (m) { m.hp = v.h; m.sp = v.s; m.dmg = v.d; } g.userData.tx = v.x; g.userData.tz = v.z; g.userData.ry = v.r; }
+    g.userData.tx = v.x; g.userData.tz = v.z; g.userData.ry = v.r; }
   for (const id in mobById) if (!(id in netMobs)) killMob(mobById[id]);
-}
-function hostTick(dt, isNight) {
-  const ps = [{ x: P.x, z: P.z }]; for (const id in remote) ps.push({ x: remote[id].tp.x, z: remote[id].tp.z });
-  for (const g of [...mobs]) if (ps.every(p => Math.hypot(p.x - g.position.x, p.z - g.position.z) > 110)) dropMob(g);
-  if ((spawnCd -= dt) <= 0 && mobs.length < (isNight ? 8 + nightNo * 4 + (ps.length - 1) * 4 : 2 * ps.length)) { spawnMob(ps[Math.floor(Math.random() * ps.length)]); spawnCd = isNight ? 2 : 12; }
-  const sl = Math.min(1, Math.max(0, (Math.sin(dayT * 6.283) - .65) * 10));
-  for (const g of [...mobs]) {
-    const m = g.userData.mob; if (sl > .3 && (m.hp -= sl * .5 * dt) <= 0) { killMob(g); continue; }
-    let tp = ps[0], bd = 1e9; for (const p of ps) { const q = Math.hypot(p.x - g.position.x, p.z - g.position.z); if (q < bd) { bd = q; tp = p; } }
-    const dx = tp.x - g.position.x, dz = tp.z - g.position.z, d = Math.hypot(dx, dz), y = g.position.y; g.rotation.y = Math.atan2(dx, dz);
-    if (d > 1.5 * g.scale.x) {
-      const sx = dx / d * m.sp * dt, sz = dz / d * m.sp * dt, px = g.position.x, pz = g.position.z;
-      const steep = (nx, nz) => H(nx, nz) - y > 1.3 * Math.hypot(nx - px, nz - pz), blk = (nx, nz) => doorBlock(nx, nz) && !doorBlock(px, pz); // zombies can't pass trapdoors
-      if (!steep(px + sx, pz) && !blk(px + sx, pz)) g.position.x += sx; if (!steep(g.position.x, pz + sz) && !blk(g.position.x, pz + sz)) g.position.z += sz;
-      g.position.y = H(g.position.x, g.position.z);
-    }
-  }
-  if (net && (pubT -= dt) <= 0) { pubT = .15; const o = {}; for (const g of mobs) { const m = g.userData.mob; o[g.userData.id] = { x: +g.position.x.toFixed(1), z: +g.position.z.toFixed(1), r: +g.rotation.y.toFixed(2), t: m.ty, h: Math.round(m.hp), s: +m.sp.toFixed(2), d: m.dmg }; } db.ref('mobs').set(Object.keys(o).length ? o : null).catch(() => {}); }
 }
 function animMobs(dt, t) {
   for (let i = corpses.length - 1; i >= 0; i--) { const c = corpses[i]; c.rotation.x = Math.max(-1.5, c.rotation.x - dt * 4); if ((c.userData.dead -= dt) <= 0) { mg.remove(c); corpses.splice(i, 1); } }
   for (const g of mobs) {
     const m = g.userData.mob, w = Math.sin(t * m.sp * 2.2 + m.ph), u = g.userData;
-    if (!isHost && u.tx != null) { const k = Math.min(1, dt * 8); g.position.x += (u.tx - g.position.x) * k; g.position.z += (u.tz - g.position.z) * k; g.position.y = H(g.position.x, g.position.z);
+    if (u.tx != null) { const k = Math.min(1, dt * 8); g.position.x += (u.tx - g.position.x) * k; g.position.z += (u.tz - g.position.z) * k; g.position.y = H(g.position.x, g.position.z);
       let da = u.ry - g.rotation.y; da = Math.atan2(Math.sin(da), Math.cos(da)); g.rotation.y += da * k; }
     m.L[0].rotation.x = w * .7; m.L[1].rotation.x = -w * .7; m.A[0].rotation.x = -1.4 + w * .12; m.A[1].rotation.x = -1.4 - w * .12; m.head.rotation.z = Math.sin(t * 2 + m.ph) * .15;
   }
-}
-function hurtFromMobs() { // every player damages only themselves
-  if (hurtCd > 0 || covered()) return;
-  for (const g of mobs) { const m = g.userData.mob;
-    if (Math.hypot(P.x - g.position.x, P.z - g.position.z) <= 1.5 * g.scale.x && Math.abs(P.y - EYE - g.position.y) < 2.5) {
-      hp -= m.dmg; hurtCd = .8; sfx(70, .3, 'square', .1, 40); $('hurt').style.opacity = 1; setTimeout(() => $('hurt').style.opacity = 0, 120); break; } }
 }
 // ===== LOOP =====
 const PAL = { dt: new THREE.Color(0x6a8f9a), db: new THREE.Color(0xc2a878), nt: new THREE.Color(0x02040c), nb: new THREE.Color(0x0c1c18) };
@@ -389,8 +355,7 @@ function loop() {
 
   dayT = (Date.now() / 1000 / 360) % 1; // shared wall-clock time: same for every player
   const isNight = Math.sin(dayT * 6.283) < .62;
-  isHost = !net || [uid, ...Object.keys(remote)].sort()[0] === uid; // lowest player id runs the zombies
-  if (isNight && !wasNight) { if (!net) nightNo++; else if (isHost) db.ref('world/night').transaction(n => (n || 0) + 1).catch(() => {}); spawnCd = 0; } wasNight = isNight;
+  wasNight = isNight;
 
   if (controls.isLocked) {
     const f = (key.KeyW ? 1 : 0) - (key.KeyS ? 1 : 0), r = (key.KeyD ? 1 : 0) - (key.KeyA ? 1 : 0), yaw = camera.rotation.y;
@@ -406,13 +371,11 @@ function loop() {
       if (vy <= 0 && P.y <= gy + (ground ? .5 : 0)) { P.y = gy; vy = 0; ground = true; } else ground = false;
     }
 
-    hurtFromMobs();
     if ((saveT += dt) > 10) { saveT = 0; save(); }
-    if (hp < 100 && hurtCd < -4) hp = Math.min(100, hp + dt * 3);
-    if (hp <= 0) { P.set(0, EYE, 8); vx = vz = vy = 0; hp = 100; }
   }
 
-  if (isHost) hostTick(dt, isNight); animMobs(dt, t); updateGhost(dt);
+  animMobs(dt, t); updateGhost(dt);
+  if (performance.now() > msgUntil) { const off = performance.now() - hbLast > 12000; $('status').innerText = off ? 'SERVER OFFLINE' : 'Online'; $('status').className = off ? 'warning' : 'success'; }
   updateChunks();
   for (const k of dirty) if (chunks[k]) paintChunk(chunks[k].mesh.geometry);
   dirty.clear();
