@@ -6,6 +6,7 @@ const key = process.env.FIREBASE_SERVICE_ACCOUNT ? JSON.parse(process.env.FIREBA
 admin.initializeApp({ credential: admin.credential.cert(key), databaseURL: 'https://kitacat-mobase-default-rtdb.europe-west1.firebasedatabase.app' });
 const db = admin.database(), fsdb = admin.firestore(), TS = admin.database.ServerValue.TIMESTAMP;
 const CS = 64, EYE = 1.6, MAXS = 26, MAXHOMES = 10, SPAWN = { x: 0, z: 8 };
+const RTP_MIN = 150, RTP_MAX = 3000, RTP_COOLDOWN = 60000; // /rtp lands between these distances from spawn (change here)
 
 // ---------- terrain: MUST stay identical to app.js ----------
 const hs = (x, z) => { const s = Math.sin(x * 127.1 + z * 311.7) * 43758.5453; return s - Math.floor(s); };
@@ -106,8 +107,14 @@ function chat(u, text) {
     case 'delhome': { const i = find(arg); if (!arg || !hsA[i]) return tell(u, 'No such home. Use /homes to see them.'); const [d] = hsA.splice(i, 1); saveH(); tell(u, `Deleted home "${d.n}".`); break; }
     case 'home': { const i = !arg && hsA.length === 1 ? 0 : find(arg); if (!hsA[i]) return tell(u, hsA.length ? 'Which home? Use /home <name or number>. See /homes.' : 'You have no homes. Use /sethome [name].'); go(hsA[i].x, hsA[i].y, hsA[i].z, `"${hsA[i].n}"`); break; }
     case 'homes': tell(u, hsA.length ? hsA.map((h, i) => `${i + 1}) ${h.n}  (${Math.round(h.x)}, ${Math.round(h.y)}, ${Math.round(h.z)})`).join('\n') : 'No homes yet. Use /sethome [name].'); break;
+    case 'rtp': {
+      const left = RTP_COOLDOWN - (t - (lastAct[u + 'rtp'] || 0)); if (left > 0) return tell(u, `RTP cooldown: ${Math.ceil(left / 1000)}s left.`);
+      let x = 0, z = 0, ok = false;
+      for (let i = 0; i < 30 && !ok; i++) { const an = Math.random() * 6.283, r = RTP_MIN + Math.sqrt(Math.random()) * (RTP_MAX - RTP_MIN); x = Math.round(Math.cos(an) * r); z = Math.round(Math.sin(an) * r); ok = !doorBlock(x, z) && (dg[x + ',' + z] || 0) > -.3; }
+      if (!ok) return tell(u, 'Could not find a safe spot, try again.');
+      lastAct[u + 'rtp'] = lastAct[u + 'tp'] = t; teleport(u, x, H(x, z), z); tell(u, `Random teleport to ${x}, ${z} (max ${RTP_MAX} blocks from spawn).`); break; }
     case 'spawn': go(SPAWN.x, H(SPAWN.x, SPAWN.z), SPAWN.z, 'spawn'); break;
-    case 'help': tell(u, '/sethome [name]  /delhome <name|#>  /home <name|#>  /homes  /spawn'); break;
+    case 'help': tell(u, '/sethome [name]  /delhome <name|#>  /home <name|#>  /homes  /spawn  /rtp'); break;
     default: tell(u, 'Unknown command. Try /help.');
   }
 }
