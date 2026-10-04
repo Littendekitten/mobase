@@ -27,3 +27,9 @@ body { width: 100vw; height: 100vh; overflow: hidden; font-family: 'Courier New'
 #chatlog.open .cl { animation: none; opacity: 1; }
 @keyframes chatfade { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
 #chatin { display: none; position: absolute; left: 20px; bottom: 232px; width: 420px; z-index: 30; background: rgba(0, 20, 0, .92); border: 1px solid #00ff66; color: #00ff66; font-family: inherit; font-size: 14px; padding: 6px 8px; outline: none; user-select: text; }
+
+/* graphics pass: nicer HUD */
+#hud { backdrop-filter: blur(6px); border-radius: 10px; background: rgba(0, 16, 8, .62); border-color: rgba(0, 255, 102, .55); }
+#hpbar { border-radius: 6px; overflow: hidden; background: rgba(0, 0, 0, .4); height: 10px; }
+#hpfill { border-radius: 6px; }
+.slot { border-radius: 8px; backdrop-filter: blur(4px); background: rgba(0, 16, 8, .62); }
