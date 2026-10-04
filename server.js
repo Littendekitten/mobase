@@ -6,6 +6,7 @@ const key = process.env.FIREBASE_SERVICE_ACCOUNT ? JSON.parse(process.env.FIREBA
 admin.initializeApp({ credential: admin.credential.cert(key), databaseURL: 'https://kitacat-mobase-default-rtdb.europe-west1.firebasedatabase.app' });
 const db = admin.database(), fsdb = admin.firestore(), TS = admin.database.ServerValue.TIMESTAMP;
 const CS = 64, EYE = 1.6, MAXS = 26, MAXHOMES = 10, SPAWN = { x: 0, z: 8 };
+const MAXLVL = 8; // zombie difficulty never goes above this (it used to grow forever)
 const RTP_MIN = 150, RTP_MAX = 3000, RTP_COOLDOWN = 60000; // /rtp lands between these distances from spawn (change here)
 
 // ---------- terrain: MUST stay identical to app.js ----------
@@ -26,6 +27,7 @@ function treePos(i, j, q) { // same random sequence the client uses for trees (4
 
 // ---------- state ----------
 const ZT = [{ hp: 30, sp: 2.4, sc: 1, dmg: 8 }, { hp: 18, sp: 5.2, sc: .9, dmg: 6 }, { hp: 120, sp: 1.7, sc: 1.45, dmg: 22 }];
+const tpaOut = {}, TPA_TTL = 60000; // tpaOut[fromUid] = { to, type, t }
 const players = {}, inv = {}, invP = {}, st = {}, doors = {}, homes = {}, chopHits = {}, lastAct = {}, chopped = new Set(), dirtyInv = new Set();
 let mobs = {}, night = 0, wasNight = null, mobSeq = 0, spawnCd = 0, pubT = 0, hadMobs = false;
 const inRect = (u, x, z, m = 0) => Math.abs(x - u.x) < u.w / 2 + m && Math.abs(z - u.z) < u.d / 2 + m;
@@ -88,7 +90,7 @@ function handle(a) {
       let b = null, bd = 1e9; for (const k in doors) if (inRect(doors[k], p.x, p.z, 2.5)) { const q = Math.hypot(doors[k].x - p.x, doors[k].z - p.z); if (q < bd) { bd = q; b = k; } }
       if (!b) return; delete doors[b]; db.ref('doors/' + b).remove(); I.doors++; touch(u); break; }
     case 'hit': {
-      const m = mobs[a.id]; if (!m || !rate('h', 110) || Math.hypot(m.x - p.x, m.z - p.z) > 100) return;
+      const m = mobs[a.id]; if (!m || !rate('h', 90) || Math.hypot(m.x - p.x, m.z - p.z) > 100) return;
       m.hp -= 20; if (m.hp <= 0) { delete mobs[a.id]; I.scrap++; touch(u); } break; }
     case 'chat': chat(u, String(a.text || '').slice(0, 200)); break;
   }
@@ -113,8 +115,28 @@ function chat(u, text) {
       for (let i = 0; i < 30 && !ok; i++) { const an = Math.random() * 6.283, r = RTP_MIN + Math.sqrt(Math.random()) * (RTP_MAX - RTP_MIN); x = Math.round(Math.cos(an) * r); z = Math.round(Math.sin(an) * r); ok = !doorBlock(x, z) && (dg[x + ',' + z] || 0) > -.3; }
       if (!ok) return tell(u, 'Could not find a safe spot, try again.');
       lastAct[u + 'rtp'] = lastAct[u + 'tp'] = t; teleport(u, x, H(x, z), z); tell(u, `Random teleport to ${x}, ${z} (max ${RTP_MAX} blocks from spawn).`); break; }
+    case 'tpa': case 'tpahere': {
+      const c = cmd.toLowerCase(); if (!arg) return tell(u, `Usage: /${c} <player>`);
+      const q = arg.toLowerCase(), all = Object.entries(players).filter(([id]) => id !== u), ex = all.filter(([, p]) => (p.name || '').toLowerCase() === q), pre = all.filter(([, p]) => (p.name || '').toLowerCase().startsWith(q));
+      const hit = ex.length === 1 ? ex : pre; if (hit.length > 1) return tell(u, 'More than one player matches. Type more of the name.'); if (!hit.length) return tell(u, 'Player not found (they must be online). You cannot /tpa yourself.');
+      const o = hit[0][0]; tpaOut[u] = { to: o, type: c, t };
+      tell(u, `Teleport request sent to ${players[o].name}. Expires in 60s. /tpacancel to cancel.`);
+      tell(o, `${name} wants ${c === 'tpa' ? 'to teleport to you' : 'you to teleport to them'}. Type /tpaccept or /tpadeny (60s).`); break; }
+    case 'tpaccept': case 'tpadeny': {
+      const c = cmd.toLowerCase(), mine = Object.entries(tpaOut).filter(([f, r]) => r.to === u && t - r.t < TPA_TTL && players[f]);
+      let pick; if (arg) { const q = arg.toLowerCase(); pick = mine.find(([f]) => (players[f].name || '').toLowerCase().startsWith(q)); } else pick = mine.sort((a, b) => b[1].t - a[1].t)[0];
+      if (!pick) return tell(u, mine.length ? 'No request from that player. Pending: ' + mine.map(([f]) => players[f].name).join(', ') : 'No pending teleport requests.');
+      const [f, r] = pick;
+      if (c === 'tpadeny') { delete tpaOut[f]; tell(u, `Denied ${players[f].name}'s request.`); tell(f, `${name} denied your teleport request.`); break; }
+      const mover = r.type === 'tpa' ? f : u, dest = r.type === 'tpa' ? u : f, pm = players[mover], pd = players[dest];
+      if (t - (lastAct[mover + 'tp'] || 0) < 5000) return tell(u, 'Teleport on cooldown (5s). Try /tpaccept again in a moment.');
+      delete tpaOut[f]; lastAct[mover + 'tp'] = t; teleport(mover, pd.x, pd.y - EYE, pd.z);
+      tell(mover, `Teleported to ${pd.name}.`); tell(dest, `${pm.name} teleported to you.`); break; }
+    case 'tpacancel': {
+      const r = tpaOut[u]; if (!r || t - r.t >= TPA_TTL) return tell(u, 'You have no pending teleport request.');
+      delete tpaOut[u]; tell(u, 'Teleport request cancelled.'); if (players[r.to]) tell(r.to, `${name} cancelled their teleport request.`); break; }
     case 'spawn': go(SPAWN.x, H(SPAWN.x, SPAWN.z), SPAWN.z, 'spawn'); break;
-    case 'help': tell(u, '/sethome [name]  /delhome <name|#>  /home <name|#>  /homes  /spawn  /rtp'); break;
+    case 'help': tell(u, '/sethome [name]  /delhome <name|#>  /home <name|#>  /homes  /spawn  /rtp\n/tpa <player>  /tpahere <player>  /tpaccept  /tpadeny  /tpacancel'); break;
     default: tell(u, 'Unknown command. Try /help.');
   }
 }
@@ -125,7 +147,7 @@ function tick() {
   const t = Date.now(), dt = Math.min(.25, (t - lastT) / 1000); lastT = t;
   const ps = Object.entries(players).filter(([, p]) => t - p.seen < 6000).map(([u, p]) => ({ u, ...p }));
   const dayT = (t / 1000 / 360) % 1, isNight = Math.sin(dayT * 6.283) < .62;
-  if (wasNight !== null && isNight && !wasNight) { night++; db.ref('world/night').set(night); spawnCd = 0; } wasNight = isNight;
+  if (wasNight !== null && isNight && !wasNight && ps.length) { night = Math.min(MAXLVL, night + 1); db.ref('world/night').set(night); spawnCd = 0; } wasNight = isNight; // only counts nights when someone is playing
   const ids = Object.keys(mobs);
   if (!ps.length) { if (ids.length) mobs = {}; }
   else {
@@ -164,7 +186,7 @@ function tick() {
 async function main() {
   const [h, d, c, n] = await Promise.all(['holes', 'doors', 'chopped', 'world/night'].map(k => db.ref(k).once('value')));
   for (const [k, v] of Object.entries(h.val() || {})) { const [x, z] = k.split('_'); dg[x + ',' + z] = v; }
-  Object.assign(doors, d.val() || {}); for (const k in (c.val() || {})) chopped.add(k); night = n.val() || 0;
+  Object.assign(doors, d.val() || {}); for (const k in (c.val() || {})) chopped.add(k); night = n.val() || 0; if (night > MAXLVL) { night = 0; db.ref('world/night').set(0); } // a value above the cap came from the old runaway bug: reset it
   await Promise.all([db.ref('actions').remove(), db.ref('mobs').remove()]); // drop stale requests / old zombies
   db.ref('players').on('value', s => { const v = s.val() || {}; for (const u in players) if (!(u in v)) delete players[u];
     for (const u in v) { const o = players[u]; if (!o || o.t !== v[u].t) players[u] = Object.assign({}, v[u], { seen: Date.now() }); else Object.assign(o, v[u]); if (!o) ensure(u); } });
