@@ -219,6 +219,13 @@ pg.setAttribute('position', new THREE.BufferAttribute(pp, 3)); pg.setAttribute('
 const parts = new THREE.Points(pg, new THREE.PointsMaterial({ size: .16, vertexColors: true, transparent: true, opacity: .9, depthWrite: false })); parts.frustumCulled = false; scene.add(parts);
 function burst(pt, hex, n, sp) { const c = new THREE.Color(hex); for (let q = 0; q < n; q++) { const i = pn++ % NP, k = i * 3; pp[k] = pt.x; pp[k + 1] = pt.y; pp[k + 2] = pt.z; pv[k] = (Math.random() - .5) * sp; pv[k + 1] = Math.random() * sp * .9; pv[k + 2] = (Math.random() - .5) * sp; pc[k] = c.r; pc[k + 1] = c.g; pc[k + 2] = c.b; pl[i] = .5 + Math.random() * .4; } }
 function stepParts(dt) { for (let i = 0; i < NP; i++) { const k = i * 3; if (pl[i] <= 0) { pp[k + 1] = -9999; continue; } pl[i] -= dt; pv[k + 1] -= 14 * dt; pp[k] += pv[k] * dt; pp[k + 1] += pv[k + 1] * dt; pp[k + 2] += pv[k + 2] * dt; } pg.attributes.position.needsUpdate = true; pg.attributes.color.needsUpdate = true; }
+function fillGrass(i, j, gmesh, gi) { // (re)plant a chunk's grass: skips dug/filled ground, sits on the current surface
+  const gr = mul(((i * 2654435761) ^ (j * 40503) ^ (gi * 977)) >>> 0), go = new THREE.Object3D(); let cnt = 0;
+  for (let q = 0; q < 800; q++) { const x = (i - .5 + gr()) * CS, z = (j - .5 + gr()) * CS, sc = .55 + gr() * .75, ry = gr() * 6.28; if (Math.hypot(x, z) < 16 || Math.abs(D(x, z)) > .06) continue;
+    const h0 = H(x, z); if (Math.abs(H(x + 1, z) - h0) + Math.abs(H(x, z + 1) - h0) > 1.3) continue;
+    go.position.set(x, h0 - .03, z); go.rotation.set(0, ry, 0); go.scale.set(sc * .9, sc, sc * .9); go.updateMatrix(); gmesh.setMatrixAt(cnt++, go.matrix); }
+  gmesh.count = cnt; gmesh.instanceMatrix.needsUpdate = true;
+}
 function paintChunk(g) {
   const p = g.attributes.position, ca = g.attributes.color, c = new THREE.Color();
   for (let n = 0; n < p.count; n++) p.setY(n, H(p.getX(n), p.getZ(n)));
@@ -234,7 +241,7 @@ function makeChunk(i, j) {
   const g = new THREE.PlaneGeometry(CS, CS, CS, CS); g.rotateX(-Math.PI / 2); g.translate(i * CS, 0, j * CS);
   g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 3), 3)); paintChunk(g);
   const mesh = new THREE.Mesh(g, terrMat); mesh.receiveShadow = true; tg.add(mesh);
-  const props = [], trees = [], d = new THREE.Object3D(), rng = mul(((i * 73856093) ^ (j * 19349663)) >>> 0);
+  const props = [], trees = [], grass = [], d = new THREE.Object3D(), rng = mul(((i * 73856093) ^ (j * 19349663)) >>> 0);
   propCfg.forEach(([n, sc], k) => {
     const im = new THREE.InstancedMesh(propGeo[k], propMats[k], n), ids = []; let cnt = 0;
     for (let q = 0; q < n; q++) {
@@ -250,15 +257,9 @@ function makeChunk(i, j) {
       for (let b = 0; b < 2; b++) { const fr = b ? .8 : .55, len = (1.7 + br() * 1.2) * (1.2 - fr * .5); bo.position.set(x, y + h * fr, z); bo.rotation.set(1 + br() * .4, br() * 6.28, 0); bo.scale.set(1, len, 1); bo.updateMatrix(); bm.setMatrixAt(n2 * 2 + b, dead ? ZERO : bo.matrix); } });
     bm.count = trees.length * 2; bm.frustumCulled = false; bm.castShadow = true; scene.add(bm); props.push(bm); trunk.userData.br = bm;
   }
-  { // wind-blown dry grass (G toggles it)
-    const gr = mul(((i * 2654435761) ^ (j * 40503)) >>> 0), go = new THREE.Object3D();
-    grassMats.forEach(gm => { const gmesh = new THREE.InstancedMesh(grassGeo, gm, 800); let cnt = 0;
-      for (let q = 0; q < 800; q++) { const x = (i - .5 + gr()) * CS, z = (j - .5 + gr()) * CS, sc = .55 + gr() * .75, ry = gr() * 6.28; if (Math.hypot(x, z) < 16) continue;
-        const h0 = H(x, z); if (Math.abs(H(x + 1, z) - h0) + Math.abs(H(x, z + 1) - h0) > 1.3) continue;
-        go.position.set(x, h0 - .03, z); go.rotation.set(0, ry, 0); go.scale.set(sc * .9, sc, sc * .9); go.updateMatrix(); gmesh.setMatrixAt(cnt++, go.matrix); }
-      gmesh.count = cnt; gmesh.frustumCulled = false; gmesh.receiveShadow = true; gmesh.visible = grassOn; scene.add(gmesh); props.push(gmesh); grassMeshes.push({ m: gmesh, x: i * CS, z: j * CS }); });
-  }
-  chunks[i + ',' + j] = { mesh, props };
+  grassMats.forEach((gm, gi) => { const gmesh = new THREE.InstancedMesh(grassGeo, gm, 800); fillGrass(i, j, gmesh, gi); // wind-blown dry grass (G toggles it)
+    gmesh.frustumCulled = false; gmesh.receiveShadow = true; gmesh.visible = grassOn; scene.add(gmesh); props.push(gmesh); grass.push([gmesh, gi]); grassMeshes.push({ m: gmesh, x: i * CS, z: j * CS }); });
+  chunks[i + ',' + j] = { mesh, props, grass, i, j };
 }
 function updateChunks() {
   let made = 0; const ci = Math.round(camera.position.x / CS), cj = Math.round(camera.position.z / CS);
@@ -481,7 +482,7 @@ function loop() {
   animMobs(dt, t); updateGhost(dt);
   if (performance.now() > msgUntil) { const off = performance.now() - hbLast > 12000; $('status').innerText = off ? 'SERVER OFFLINE' : 'Online'; $('status').className = off ? 'warning' : 'success'; }
   updateChunks();
-  for (const k of dirty) if (chunks[k]) paintChunk(chunks[k].mesh.geometry);
+  for (const k of dirty) if (chunks[k]) { const c = chunks[k]; paintChunk(c.mesh.geometry); c.grass.forEach(([m, gi]) => fillGrass(c.i, c.j, m, gi)); } // terrain changed: repaint + replant grass
   dirty.clear();
   // sky & light
   const raw = Math.sin(dayT * 6.283) - .7, se = raw > 0 ? raw / .3 : raw / 1.7, day = Math.min(1, Math.max(0, se * 3 + .4)), ang = dayT * 6.283;
