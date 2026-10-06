@@ -2,10 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <title>Mobase - 3D Wasteland</title>
   <link rel="icon" href="favicon.ico" sizes="any">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=3">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script>
     const E = "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/";
@@ -26,16 +28,35 @@
     <p>Survivor: <span id="player-name">Guest</span></p>
     <p>Status: <span id="status" class="warning">Sign in required</span></p>
     <p>Players: <span id="player-count">0</span></p>
-    <p>Kills: <b id="scrap">0</b> | Mode: <b id="mode">COMBAT</b></p>
-    <p>Wood: <b id="wood">0</b> | Trapdoors: <b id="doors">0</b></p>
+    <p>Kills: <b id="scrap">0</b> | Holding: <b id="mode">PISTOL</b></p>
+    <p>Wood: <b id="wood">0</b> | Sticks: <b id="sticks">0</b> | Trapdoors: <b id="doors">0</b></p>
+    <p>Stone: <b id="stone">0</b> | Starlight: <b id="star">0</b></p>
     <p>Ammo: <b id="ammo">15/15</b></p>
     <p id="clock">DAY</p>
     <div id="hpbar"><div id="hpfill"></div></div>
   </div>
 
+  <div id="mineBar"><div id="mineFill"></div></div>
   <div id="hotbar"></div>
   <div id="chatlog"></div>
   <input id="chatin" maxlength="200" autocomplete="off" placeholder="Chat or /command  (Enter to send)">
+
+  <div id="invscreen">
+    <div id="invbox">
+      <button id="invclose">&#10005;</button>
+      <div id="invleft"><h3>INVENTORY</h3><div id="invgrid"></div><p class="hint">Click a slot, then another slot to move / swap. Bottom row is your hotbar (keys 1-9).</p></div>
+      <div id="invright"><h3>CRAFTING</h3><div id="recipes"></div><p class="hint">Wood comes from trees (shovel). A pickaxe needs a placed crafting table within 5 blocks.</p></div>
+    </div>
+  </div>
+
+  <div id="rotate">Rotate your phone to landscape</div>
+  <div id="touch">
+    <div id="lookzone"></div>
+    <div id="joy"><div id="joyk"></div></div>
+    <div class="tb" id="bFire">USE</div><div class="tb" id="bFill">FILL</div><div class="tb" id="bJump">JUMP</div><div class="tb" id="bRun">RUN</div>
+    <div class="tb" id="bInv">BAG</div><div class="tb" id="bChat">CHAT</div><div class="tb" id="bMenu">MENU</div>
+    <div class="tb" id="bFlash">LIGHT</div><div class="tb" id="bReload">RELOAD</div><div class="tb" id="bTake">TAKE</div>
+  </div>
 
   <div id="blocker">
     <div id="instructions">
@@ -47,17 +68,22 @@
         Sign in with Google
       </button>
       <div id="controls-info" style="display:none; margin-top:20px;">
-        <p style="color:#00ff66; margin-bottom:10px;"><b>CLICK TO ENTER</b></p>
-        <p style="font-size:.85rem; color:#aaffcc; line-height:1.6;">
-          <b>WASD</b> walk | <b>SHIFT</b> sprint | <b>SPACE</b> jump<br>
-          <b>1</b> gun (hold LEFT, <b>R</b> reload) | <b>2</b> shovel | <b>WHEEL</b> switch<br>
-          Shovel: hold <b>LEFT</b> dig, <b>RIGHT</b> fill | <b>F</b> flashlight<br>
-          <b>3</b> trapdoor | shovel + <b>LEFT</b> on a tree = chop wood<br><b>C</b> craft trapdoor (4 wood) | <b>E</b> pick up trapdoor<br>Bunker: dig a pit, jump in, look UP, place a trapdoor.<br>Green outline = where it lands. It stretches to cover the whole pit!<br><b>ENTER</b>/<b>T</b> chat | /sethome /delhome /home /homes /spawn /rtp /tpa /tpahere /tpaccept /tpadeny /tpacancel /help<br><b>G</b> grass on/off (faster) | <b>M</b> mute
+        <p style="color:#00ff66; margin-bottom:10px;"><b class="kbd">CLICK TO ENTER</b><b class="tch">TAP TO PLAY</b></p>
+        <p class="kbd" style="font-size:.8rem; color:#aaffcc; line-height:1.55;">
+          <b>WASD</b> walk | <b>SHIFT</b> sprint | <b>SPACE</b> jump | <b>1-9</b> / <b>WHEEL</b> hotbar<br>
+          <b>E</b> inventory + crafting | <b>Q</b> pick up trapdoor / table | <b>F</b> light | <b>R</b> reload<br>
+          <b>LEFT</b> use item (shovel: dig, chop trees; hold 60s on Starlight to mine it) | <b>RIGHT</b> fill<br>
+          <b>ENTER</b>/<b>T</b> chat | /sethome /home /homes /delhome /spawn /rtp /tpa /tpahere /tpaccept /tpadeny /tpacancel<br>
+          <b>G</b> grass on/off | <b>M</b> mute
+        </p>
+        <p class="tch" style="font-size:.8rem; color:#aaffcc; line-height:1.55;">
+          Left stick: move | drag right side: look | <b>USE</b>: shoot / dig / mine / place<br>
+          <b>BAG</b>: inventory + crafting | tap hotbar to switch item | <b>CHAT</b> for commands (/help)
         </p>
       </div>
     </div>
   </div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=3"></script>
 </body>
 </html>
