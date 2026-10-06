@@ -228,7 +228,7 @@ async function main() {
     for (const u in v) { const o = players[u]; if (!o || o.t !== v[u].t) players[u] = Object.assign({}, v[u], { seen: Date.now() }); else Object.assign(o, v[u]); if (!o) ensure(u); } });
   db.ref('actions').on('child_added', async s => { const a = s.val(); s.ref.remove(); if (!a || !players[a.uid]) return; try { await ensure(a.uid); handle(a); } catch (e) { console.error(e); } });
   setInterval(tick, 100); setInterval(() => db.ref('world/hb').set(TS), 3000);
-  setInterval(async () => { const s = await db.ref('chat').once('value'), k = Object.keys(s.val() || {}); for (const x of k.slice(0, -50)) db.ref('chat/' + x).remove(); }, 60000);
+  setInterval(async () => { const s = await db.ref('chat').once('value'), c = s.val() || {}, t = Date.now(); for (const k in c) if (t - (c[k].t || 0) > 60000) db.ref('chat/' + k).remove(); }, 10000); // chat messages are deleted after 1 minute
   // tiny web endpoint: Render's free plan needs a web service, and visits to /ping keep it awake
   require('http').createServer((q, r) => { r.writeHead(200, { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'text/plain' }); r.end('mobase ok'); }).listen(process.env.PORT || 3000);
   console.log('MOBASE server running. night', night, '| holes', Object.keys(dg).length, '| doors', Object.keys(doors).length);
