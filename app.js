@@ -19,7 +19,7 @@ let hp = 100, scrap = 60, mode = 'combat', sel = 0, nightNo = 0, dayT = 0.2, log
 const remote = {}, blocks = {}, mobs = [], tracers = [], trunks = [], choppedSet = new Set(), mobById = {};
 let netMobs = {}, hbLast = 0, chatting = false, tpInit = false, msgInit = false, msgUntil = 0;
 const isTouch = matchMedia('(pointer: coarse)').matches && matchMedia('(hover: none)').matches; // phones/tablets get touch controls + lighter graphics
-let INV = {}, layout = ['gun', 'shovel', 'pick', 'door', 'table', 'wood', 'stick', 'stone', 'star', ...Array(27).fill(null)], invOpen = false, picked = null, touchOn = false, touchRun = false, curMine = null, mineStart = 0, mineLast = 0;
+let INV = {}, layout = ['gun', 'shovel', ...Array(34).fill(null)], invLoaded = false, srvOff = 0, invOpen = false, picked = null, touchOn = false, touchRun = false, curMine = null, mineStart = 0, mineLast = 0;
 const joy = { x: 0, y: 0 }, rockM = [], ruinM = [], starM = [], propLists = [trunks, rockM, ruinM, starM], minedSet = new Set(), solidByKey = new Map(), tablesList = [];
 const act = o => db.ref('actions').push({ uid, ...o }).catch(() => {}); // the ONLY way the client changes the world: ask the server
 
@@ -289,10 +289,15 @@ const RECIPES = [
   { id: 'door', n: 'Trapdoor', cost: '4 Wood', ok: () => (INV.logs || 0) >= 4 }];
 const cntOf = id => { const k = ITEMS[id] && ITEMS[id].k; return k ? (INV[k] || 0) : -1; }; // -1 = tool you always have
 const modeOf = id => { const it = ITEMS[id]; if (!it || !it.t) return 'hand'; return it.k && !(INV[it.k] > 0) ? 'hand' : it.t; };
-function fixLayout() { // every item exactly once, 36 slots (9 hotbar + 27 bag)
+function fixLayout() { // 36 slots, no duplicates, you always keep your pistol + shovel
   layout = layout.slice(0, 36); while (layout.length < 36) layout.push(null);
   layout = layout.map((id, i) => ITEMS[id] && layout.indexOf(id) === i ? id : null);
-  for (const id in ITEMS) if (!layout.includes(id)) layout[layout.indexOf(null)] = id;
+  for (const id of ['gun', 'shovel']) if (!layout.includes(id)) layout[layout.indexOf(null)] = id;
+}
+function syncLayout() { // got an item -> first empty hotbar slot (else bag); ran out -> slot empties
+  for (const id in ITEMS) { const have = cntOf(id) !== 0, at = layout.indexOf(id);
+    if (have && at < 0) { let i = layout.slice(0, 9).indexOf(null); if (i < 0) i = layout.indexOf(null, 9); if (i >= 0) layout[i] = id; }
+    else if (!have && at >= 0) layout[at] = null; }
 }
 const slotHTML = (i, cls, num) => { const id = layout[i], it = ITEMS[id], u = num ? '<u>' + num + '</u>' : ''; if (!it) return `<div class="${cls}" data-i="${i}">${u}</div>`; const n = cntOf(id);
   return `<div class="${cls}${n === 0 ? ' dim' : ''}" data-i="${i}">${u}<i style="background:${it.c}"></i><span>${it.n}</span>${n >= 0 ? '<b>' + n + '</b>' : ''}</div>`; };
@@ -304,7 +309,7 @@ function renderInv() {
   $('invgrid').innerHTML = g; const near = tablesList.some(t => Math.hypot(t.x - P.x, t.z - P.z) < 5);
   $('recipes').innerHTML = RECIPES.map(r => { const ok = r.ok() && (!r.table || near); return `<div class="rec${ok ? '' : ' no'}"><div><b>${r.n}</b><br><small>${r.cost}${r.table ? (near ? ' | table nearby' : ' | needs a crafting table nearby') : ''}</small></div><button data-r="${r.id}" ${ok ? '' : 'disabled'}>CRAFT</button></div>`; }).join('');
 }
-function renderUI() { mode = modeOf(layout[sel]); renderHotbar(); for (const [id, k] of [['wood', 'logs'], ['doors', 'doors'], ['sticks', 'sticks'], ['stone', 'stone'], ['star', 'star']]) $(id).innerText = INV[k] || 0; if (invOpen) renderInv(); }
+function renderUI() { if (invLoaded) syncLayout(); mode = modeOf(layout[sel]); renderHotbar(); for (const [id, k] of [['wood', 'logs'], ['doors', 'doors'], ['sticks', 'sticks'], ['stone', 'stone'], ['star', 'star']]) $(id).innerText = INV[k] || 0; if (invOpen) renderInv(); }
 $('hotbar').addEventListener('pointerdown', e => { const el = e.target.closest('.slot'); if (el) { e.preventDefault(); setSel(+el.dataset.i); } });
 $('invgrid').addEventListener('pointerdown', e => { const el = e.target.closest('.islot'); if (!el) return; const i = +el.dataset.i;
   if (picked === null) { if (layout[i]) picked = i; } else { [layout[picked], layout[i]] = [layout[i], layout[picked]]; picked = null; mode = modeOf(layout[sel]); renderHotbar(); save(); } renderInv(); });
@@ -328,13 +333,14 @@ function initNet() {
   db.ref('doors').on('child_added', s => addDoor(s.key, s.val())); db.ref('doors').on('child_removed', s => removeDoor(s.key));
   db.ref('world/night').on('value', s => { nightNo = s.val() || 0; });
   db.ref('world/hb').on('value', () => { hbLast = performance.now(); });
-  db.ref('inv/' + uid).on('value', s => { INV = s.val() || {}; logs = INV.logs || 0; doors = INV.doors || 0; scrap = INV.scrap || 0; renderUI(); });
+  db.ref('inv/' + uid).on('value', s => { invLoaded = true; INV = s.val() || {}; logs = INV.logs || 0; doors = INV.doors || 0; scrap = INV.scrap || 0; renderUI(); });
   db.ref('mined').on('child_added', s => { minedSet.add(s.key); applyMined(s.key); });
   db.ref('tables').on('child_added', s => addTable(s.key, s.val())); db.ref('tables').on('child_removed', s => removeTable(s.key));
   db.ref('stats/' + uid).on('value', s => { const v = s.val(); if (!v) return; if (v.hp < hp) { sound('hurt'); $('hurt').style.opacity = 1; setTimeout(() => $('hurt').style.opacity = 0, 120); } hp = v.hp; });
   db.ref('tp/' + uid).on('value', s => { const v = s.val(); if (!tpInit) { tpInit = true; return; } if (v) { P.set(v.x, Math.max(v.y, H(v.x, v.z)) + EYE + .3, v.z); vx = vz = vy = 0; } });
   db.ref('msgs/' + uid).on('value', s => { const v = s.val(); if (!msgInit) { msgInit = true; return; } if (v) addChat(v.text, 'sys'); });
-  db.ref('chat').limitToLast(30).on('child_added', s => { const v = s.val(); addChat(v.name + ': ' + v.text); });
+  db.ref('.info/serverTimeOffset').on('value', s => { srvOff = s.val() || 0; });
+  db.ref('chat').limitToLast(30).on('child_added', s => { const v = s.val(), age = (Date.now() + srvOff - (v.t || 0)) / 1000; if (age > 60) return; addChat(v.name + ': ' + v.text, '', age); });
   db.ref('mobs').on('value', s => { netMobs = s.val() || {}; syncMobs(); });
   const me = db.ref('players/' + uid); me.onDisconnect().remove();
   setInterval(() => { if (active()) me.set({ name: pname, x: camera.position.x, y: camera.position.y, z: camera.position.z, t: Date.now() }); }, 100);
@@ -354,8 +360,8 @@ function initNet() {
 
 // ===== CHAT =====
 const chatIn = $('chatin'), chatLog = $('chatlog');
-function addChat(text, cls) {
-  for (const line of String(text).split('\n')) { const d = document.createElement('div'); d.className = 'cl ' + (cls || ''); d.textContent = line; chatLog.appendChild(d); }
+function addChat(text, cls, age = 0) { // age (seconds) lets messages that were sent a while ago appear already faded
+  for (const line of String(text).split('\n')) { const d = document.createElement('div'); d.className = 'cl ' + (cls || ''); d.textContent = line; if (age > 0) d.style.animationDelay = '-' + Math.min(age, 60) + 's'; chatLog.appendChild(d); setTimeout(() => d.remove(), Math.max(0, 60 - age) * 1000); }
   while (chatLog.children.length > 14) chatLog.removeChild(chatLog.firstChild); chatLog.scrollTop = 1e6;
 }
 function openChat(pre) { chatting = true; if (!isTouch) controls.unlock(); chatIn.style.display = 'block'; chatIn.value = pre || ''; chatIn.focus(); chatLog.classList.add('open'); }
