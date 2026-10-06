@@ -22,10 +22,10 @@ body { width: 100vw; height: 100vh; overflow: hidden; font-family: 'Courier New'
 @keyframes pulse { 50% { filter: drop-shadow(0 0 26px #ffd91a); } }
 
 #chatlog { position: absolute; left: 20px; bottom: 20px; width: 420px; max-height: 220px; overflow: hidden; z-index: 12; pointer-events: none; font-size: 13px; line-height: 1.35; }
-#chatlog .cl { background: rgba(0, 20, 0, .6); padding: 2px 8px; margin-top: 2px; color: #aaffcc; animation: chatfade 14s forwards; user-select: text; }
+#chatlog .cl { background: rgba(0, 20, 0, .6); padding: 2px 8px; margin-top: 2px; color: #aaffcc; animation: chatfade 5s forwards; user-select: text; }
 #chatlog .cl.sys { color: #ffcc66; }
 #chatlog.open .cl { animation: none; opacity: 1; }
-@keyframes chatfade { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes chatfade { 0%, 76% { opacity: 1; } 100% { opacity: 0; } }
 #chatin { display: none; position: absolute; left: 20px; bottom: 232px; width: 420px; z-index: 30; background: rgba(0, 20, 0, .92); border: 1px solid #00ff66; color: #00ff66; font-family: inherit; font-size: 14px; padding: 6px 8px; outline: none; user-select: text; }
 
 /* graphics pass: nicer HUD */
