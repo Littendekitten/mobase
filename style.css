@@ -65,7 +65,7 @@ body { width: 100vw; height: 100vh; overflow: hidden; font-family: 'Courier New'
 @media (max-width: 800px) { #invbox { flex-direction: column; gap: 12px; padding: 14px; } #invgrid { grid-template-columns: repeat(9, 9.6vw); gap: 4px; } .islot { width: 9.6vw; height: 9.6vw; padding-top: 2px; font-size: 7px; } .islot i { width: 4vw; height: 4vw; } }
 
 /* ===== v3: mobile / touch ===== */
-#touch, #rotate { display: none; }
+#touch { display: none; }
 body.touch #touch { display: block; }
 body.touch { touch-action: none; overscroll-behavior: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 #lookzone { position: absolute; inset: 0; z-index: 8; touch-action: none; }
@@ -78,10 +78,27 @@ body.touch { touch-action: none; overscroll-behavior: none; -webkit-user-select:
 #bInv { right: 12px; top: 12px; } #bChat { right: 78px; top: 12px; } #bMenu { right: 144px; top: 12px; }
 #bFlash { right: 12px; top: 78px; } #bReload { right: 78px; top: 78px; } #bTake { right: 144px; top: 78px; }
 body.touch .kbd { display: none; } body:not(.touch) .tch { display: none; }
-@media (orientation: portrait) { body.touch #rotate { display: flex; position: fixed; inset: 0; z-index: 99; background: #050505; color: #00ff66; align-items: center; justify-content: center; text-align: center; font-size: 20px; padding: 20px; } }
 body.touch #hud { transform: scale(.72); transform-origin: top left; top: 6px; left: 6px; }
 body.touch #hotbar { bottom: 6px; gap: 4px; } body.touch .slot { width: 8.4vw; min-height: 48px; font-size: 9px; padding: 3px 1px; } body.touch .slot i { width: 18px; height: 18px; margin-bottom: 2px; } body.touch .slot span { font-size: 8px; }
 body.touch #chatlog { bottom: 70px; left: 8px; width: 40vw; font-size: 10px; }
 body.touch #chatin { bottom: auto; top: 10px; left: 10px; width: 62vw; }
 body.touch #mineBar { bottom: 76px; }
 body.touch #invbox { max-height: 92vh; }
+
+/* ===== v4: settings, graphics warning, error box ===== */
+#gearBtn { margin-top: 14px; background: transparent; color: #00ff66; border: 1px solid #00ff66; padding: 10px 16px; font-family: inherit; font-size: 13px; cursor: pointer; border-radius: 6px; }
+#settings, #gfxwarn { display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, .82); align-items: center; justify-content: center; }
+#settings { z-index: 40; } #gfxwarn { z-index: 50; }
+#setbox, #warnbox { position: relative; width: min(520px, 94vw); max-height: 92vh; overflow: auto; background: rgba(0, 18, 8, .98); border: 2px solid #00ff66; border-radius: 10px; padding: 20px 22px; color: #aaffcc; box-shadow: 0 0 30px rgba(0, 255, 102, .3); }
+#setbox h3, #warnbox h3 { color: #00ff66; letter-spacing: 3px; margin-bottom: 10px; } #setbox h4 { margin: 16px 0 6px; color: #00ff66; }
+#setclose { position: absolute; top: 8px; right: 12px; background: none; border: 0; color: #00ff66; font-size: 22px; cursor: pointer; }
+.row { display: flex; gap: 8px; }
+#nameIn { flex: 1; min-width: 0; background: #021; border: 1px solid #00ff66; color: #00ff66; padding: 10px; font-family: inherit; font-size: 15px; border-radius: 6px; outline: none; user-select: text; -webkit-user-select: text; }
+#nameBtn, #gfxyes, #gfxno, #ctlopts button { background: rgba(0, 40, 20, .7); color: #00ff66; border: 1px solid #00ff66; padding: 10px 14px; font-family: inherit; font-weight: bold; border-radius: 6px; cursor: pointer; }
+#nameBtn:disabled { opacity: .4; } #gfxyes { background: #ff5533; border-color: #ff5533; color: #fff; }
+.gopt { display: block; width: 100%; text-align: left; background: rgba(0, 40, 20, .6); border: 1px solid #1d5a35; color: #aaffcc; padding: 10px 12px; margin-bottom: 8px; border-radius: 8px; font-family: inherit; cursor: pointer; }
+.gopt b { display: block; color: #00ff66; } .gopt small { font-size: 11px; }
+.gopt.sel, #ctlopts button.sel { border-color: #00ff66; box-shadow: 0 0 10px rgba(0, 255, 102, .55); background: rgba(0, 90, 40, .55); }
+#ctlopts { display: flex; gap: 8px; flex-wrap: wrap; } #ctlopts button { flex: 1; min-width: 120px; }
+#warnbox p { margin: 6px 0 18px; font-size: 16px; line-height: 1.4; color: #ffd2a0; }
+#errbox { display: none; position: fixed; left: 0; right: 0; top: 0; z-index: 200; background: rgba(130, 0, 0, .94); color: #fff; font: 12px monospace; padding: 8px 10px; white-space: pre-wrap; }
