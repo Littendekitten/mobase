@@ -36,7 +36,7 @@ function treePos(i, j, q) { // same random sequence the client uses for trees (4
 
 // ---------- state ----------
 const ZT = [{ hp: 30, sp: 2.4, sc: 1, dmg: 8 }, { hp: 18, sp: 5.2, sc: .9, dmg: 6 }, { hp: 120, sp: 1.7, sc: 1.45, dmg: 22 }];
-const tables = {}, mined = new Set(), mineProg = {}, hitCount = {};
+const tables = {}, mined = new Set(), mineProg = {}, hitCount = {}, tableHits = {};
 const tpaOut = {}, TPA_TTL = 60000; // tpaOut[fromUid] = { to, type, t }
 const players = {}, inv = {}, invP = {}, st = {}, doors = {}, homes = {}, chopHits = {}, lastAct = {}, chopped = new Set(), dirtyInv = new Set();
 let mobs = {}, night = 0, wasNight = null, mobSeq = 0, spawnCd = 0, pubT = 0, hadMobs = false;
@@ -103,6 +103,10 @@ function handle(a) {
       const cx = +a.cx, cz = +a.cz, ry = +a.ry || 0; if (!isFinite(cx) || !isFinite(cz) || Math.hypot(cx - p.x, cz - p.z) > 9 || !rate('tb', 300)) return;
       if (Object.values(tables).some(o => Math.hypot(o.x - cx, o.z - cz) < 1.4)) return tell(u, 'Too close to another crafting table.');
       const d = { x: +cx.toFixed(2), y: +H(cx, cz).toFixed(2), z: +cz.toFixed(2), ry: +ry.toFixed(2) }, r = db.ref('tables').push(); tables[r.key] = d; r.set(d); I.tables--; touch(u); break; }
+    case 'breaktable': { // any tool or bare hands: 4 quick hits break a crafting table and give it back
+      const id = String(a.id), tb = tables[id]; if (!tb || Math.hypot(tb.x - p.x, tb.z - p.z) > 6 || !rate('bt', 180)) return;
+      const th = tableHits[id], n = (th && t - th.t < 2000 ? th.n : 0) + 1; tableHits[id] = { n, t }; if (n < 4) return;
+      delete tableHits[id]; delete tables[id]; db.ref('tables/' + id).remove(); I.tables++; touch(u); break; }
     case 'mine': { // k: r = rock (4 pickaxe hits), b = ruined block (10 hits), s = starlight (hold 60s straight with the shovel)
       const key = String(a.key), m = /^([rbs])_(-?\d+)_(-?\d+)_(\d+)$/.exec(key); if (!m || mined.has(key)) return;
       const k = 'rbs'.indexOf(m[1]) + 1, o = chunkProps(+m[2], +m[3])[k][+m[4]]; if (!o) return;
