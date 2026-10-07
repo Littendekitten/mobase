@@ -18,7 +18,20 @@ let uid = null, pname = 'Survivor', net = false;
 let hp = 100, scrap = 60, mode = 'combat', sel = 0, nightNo = 0, dayT = 0.2, logs = 0, doors = 0, wasNight = false, spawnCd = 0, hurtCd = 0;
 const remote = {}, blocks = {}, mobs = [], tracers = [], trunks = [], choppedSet = new Set(), mobById = {};
 let netMobs = {}, hbLast = 0, chatting = false, tpInit = false, msgInit = false, msgUntil = 0;
-const isTouch = matchMedia('(pointer: coarse)').matches && matchMedia('(hover: none)').matches; // phones/tablets get touch controls + lighter graphics
+const store = { get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} }, del: k => { try { localStorage.removeItem(k); } catch (e) {} } };
+const urlMode = (() => { try { return new URLSearchParams(location.search).get('mode'); } catch (e) { return null; } })();
+const ctlPref = urlMode || store.get('mobase_mode') || 'auto'; // Settings > Controls can force 'touch' or 'desktop'
+const isTouch = ctlPref === 'touch' ? true : ctlPref === 'desktop' ? false : (/Android|iPhone|iPad|iPod|Mobile|Tablet/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) || (navigator.maxTouchPoints > 0 && Math.min(screen.width, screen.height) < 600) || (matchMedia('(pointer: coarse)').matches && matchMedia('(hover: none)').matches));
+const GFX = { // pr = resolution scale, rad = view distance (chunks), shadow = shadow-map size (0 = off), grass = grass amount, msaa = edge smoothing
+  lite: { n: 'Default Graphics Lite', d: 'Fastest. Best for phones and weak PCs.', pr: isTouch ? .75 : 1, rad: 1, shadow: 0, grass: 0, bloom: false, msaa: 0, clouds: 0, ash: .3, fog: 1.25 },
+  normal: { n: 'Default Graphics', d: 'Balanced looks and speed.', pr: isTouch ? 1 : 1.5, rad: isTouch ? 1 : 2, shadow: isTouch ? 1024 : 2048, grass: isTouch ? .4 : .67, bloom: !isTouch, msaa: isTouch ? 0 : 4, clouds: 1, ash: 1, fog: 1 },
+  realistic: { n: 'Realistic Graphics', d: 'Best looking. Heavy: can lag or crash weaker devices.', pr: 2, rad: isTouch ? 2 : 3, shadow: isTouch ? 2048 : 4096, grass: 1, bloom: true, msaa: 4, clouds: 1, ash: 1, fog: .8 } };
+let gfxKey = store.get('mobase_gfx'), gfxNote = ''; if (!GFX[gfxKey]) gfxKey = isTouch ? 'lite' : 'normal';
+if (gfxKey === 'realistic') { // crash guard: if the page died within 30s of switching to Realistic, fall back so you don't get stuck in a crash loop
+  if (store.get('mobase_gfx_try') === 'running') { gfxKey = 'lite'; store.set('mobase_gfx', 'lite'); store.del('mobase_gfx_try'); gfxNote = 'Realistic Graphics crashed last time, so you were switched to Default Graphics Lite.'; }
+  else { store.set('mobase_gfx_try', 'running'); setTimeout(() => store.del('mobase_gfx_try'), 30000); } }
+else store.del('mobase_gfx_try');
+const GQ = GFX[gfxKey];
 let INV = {}, layout = ['gun', 'shovel', ...Array(34).fill(null)], invLoaded = false, srvOff = 0, invOpen = false, picked = null, touchOn = false, touchRun = false, curMine = null, mineStart = 0, mineLast = 0;
 const joy = { x: 0, y: 0 }, rockM = [], ruinM = [], starM = [], propLists = [trunks, rockM, ruinM, starM], minedSet = new Set(), solidByKey = new Map(), tablesList = [];
 const act = o => db.ref('actions').push({ uid, ...o }).catch(() => {}); // the ONLY way the client changes the world: ask the server
@@ -33,6 +46,7 @@ function start(id, name, online) {
   $('player-count').innerText = 1;
 }
 $('google-btn').onclick = () => { const pr = new firebase.auth.GoogleAuthProvider(); auth.signInWithPopup(pr).catch(e => { if (['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment', 'auth/web-storage-unsupported'].includes(e.code)) auth.signInWithRedirect(pr); else alert('Login failed: ' + e.message); }); };
+auth.getRedirectResult().catch(e => { if (e && e.code) alert('Login failed: ' + e.message); });
 let loaded = false, saveT = 0;
 const userDoc = () => fs.collection('users').doc(uid);
 auth.onAuthStateChanged(u => {
@@ -42,9 +56,10 @@ auth.onAuthStateChanged(u => {
     const v = d.exists ? d.data() : {};
     if (v.pos) P.set(v.pos.x, Math.max(v.pos.y, H(v.pos.x, v.pos.z) + EYE), v.pos.z);
     if (Array.isArray(v.layout)) { layout = v.layout; fixLayout(); renderUI(); }
+    if (v.name) { const n = cleanName(v.name); if (n.length >= 2) setName(n); }
     wasNight = Math.sin(dayT * 6.283) < .62;
   }).catch(() => {}).then(() => {
-    loaded = true;
+    loaded = true; userDoc().onSnapshot(s => { const n = cleanName((s.data() || {}).name); if (n.length >= 2 && n !== pname) setName(n); }, () => {}); // live: editing users/<id>/name in Firestore renames you
     userDoc().set({ name: pname, email: u.email, photoURL: u.photoURL, lastLogin: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(() => {});
   });
 });
@@ -69,13 +84,13 @@ scene.fog = new THREE.FogExp2(0x8a7d62, 0.014);
 const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 1000);
 camera.rotation.order = 'YXZ'; // must match PointerLockControls, otherwise yaw/pitch read back wrong
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(innerWidth, innerHeight); renderer.setPixelRatio(Math.min(devicePixelRatio, isTouch ? 1 : 1.5));
-renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.setSize(innerWidth, innerHeight); renderer.setPixelRatio(Math.min(devicePixelRatio, GQ.pr));
+renderer.shadowMap.enabled = !!GQ.shadow; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
 const PR = renderer.getPixelRatio();
-const composer = new THREE.EffectComposer(renderer, renderer.capabilities.isWebGL2 && !isTouch ? new THREE.WebGLMultisampleRenderTarget(innerWidth * PR, innerHeight * PR, { format: THREE.RGBAFormat }) : undefined);
+const composer = new THREE.EffectComposer(renderer, renderer.capabilities.isWebGL2 && GQ.msaa ? new THREE.WebGLMultisampleRenderTarget(innerWidth * PR, innerHeight * PR, { format: THREE.RGBAFormat }) : undefined);
 composer.addPass(new THREE.RenderPass(scene, camera));
-if (!isTouch) composer.addPass(new THREE.UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), .8, .7, .95));
+if (GQ.bloom) composer.addPass(new THREE.UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), .8, .7, .95));
 const grade = new THREE.ShaderPass({ uniforms: { tDiffuse: { value: null }, time: { value: 1 }, hurt: { value: 0 } },
   vertexShader: 'varying vec2 v;void main(){v=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
   fragmentShader: `uniform sampler2D tDiffuse;uniform float time,hurt;varying vec2 v;
@@ -89,30 +104,30 @@ void main(){vec2 d=v-.5;vec2 o=d*(.004+hurt*.008);
 composer.addPass(grade);
 
 const sun = new THREE.DirectionalLight(0xffe0a0, 1);
-sun.castShadow = true; sun.shadow.mapSize.set(isTouch ? 1024 : 2048, isTouch ? 1024 : 2048);
+sun.castShadow = !!GQ.shadow; sun.shadow.mapSize.set(GQ.shadow || 1024, GQ.shadow || 1024);
 Object.assign(sun.shadow.camera, { left: -60, right: 60, top: 60, bottom: -60, far: 400 });
 sun.shadow.bias = -0.0005;
 scene.add(sun, sun.target);
 const hemi = new THREE.HemisphereLight(0x9ab, 0x332a20, .4); scene.add(hemi);
 
-const skyU = { t: { value: new THREE.Color() }, b: { value: new THREE.Color() }, sd: { value: new THREE.Vector3(0, 1, 0) }, time: { value: 0 } };
+const skyU = { t: { value: new THREE.Color() }, b: { value: new THREE.Color() }, sd: { value: new THREE.Vector3(0, 1, 0) }, time: { value: 0 }, cloudQ: { value: GQ.clouds } };
 const sky = new THREE.Mesh(new THREE.SphereGeometry(450, 24, 12), new THREE.ShaderMaterial({
   uniforms: skyU, side: THREE.BackSide, depthWrite: false, fog: false,
   vertexShader: 'varying vec3 p;void main(){p=normalize(position);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
-  fragmentShader: `uniform vec3 t,b,sd;uniform float time;varying vec3 p;
+  fragmentShader: `uniform vec3 t,b,sd;uniform float time,cloudQ;varying vec3 p;
 float h(vec2 s){return fract(sin(dot(s,vec2(127.1,311.7)))*43758.5453);}
 float nz(vec2 s){vec2 i=floor(s),f=fract(s);f=f*f*(3.-2.*f);return mix(mix(h(i),h(i+vec2(1.,0.)),f.x),mix(h(i+vec2(0.,1.)),h(i+vec2(1.,1.)),f.x),f.y);}
 float fb(vec2 s){float a=.5,r=0.;for(int i=0;i<5;i++){r+=a*nz(s);s=s*2.03+17.;a*=.5;}return r;}
 void main(){vec3 c=mix(b,t,pow(max(p.y,0.),.5));float s=max(dot(p,sd),0.),m=max(dot(p,-sd),0.);
   c+=vec3(1.,.75,.45)*(pow(s,900.)*6.+pow(s,6.)*.18)*step(-.1,sd.y);c+=vec3(.6,.7,1.)*pow(m,1500.)*3.*step(sd.y,.1);
-  vec2 uv=p.xz/(p.y+.2)*1.3+vec2(time*.012,time*.006);float cl=smoothstep(.48,.78,fb(uv))*smoothstep(.02,.3,p.y);
+  vec2 uv=p.xz/(p.y+.2)*1.3+vec2(time*.012,time*.006);float cl=0.;if(cloudQ>.5){cl=smoothstep(.48,.78,fb(uv))*smoothstep(.02,.3,p.y);}
   vec3 cc=mix(t,vec3(1.),.5)*(.45+.55*clamp(sd.y+.3,0.,1.));cc+=vec3(1.,.8,.55)*pow(s,10.)*.5*step(-.1,sd.y);
   c=mix(c,cc,cl*.85);gl_FragColor=vec4(c,1.);}` }));
 scene.add(sky);
 const AN = 500, ap = new Float32Array(AN * 3).map(() => (Math.random() - .5) * 60), ag = new THREE.BufferGeometry();
 ag.setAttribute('position', new THREE.BufferAttribute(ap, 3));
 const ash = new THREE.Points(ag, new THREE.PointsMaterial({ color: 0xcfc2a8, size: .08, transparent: true, opacity: .6, depthWrite: false }));
-ash.frustumCulled = false; scene.add(ash);
+ash.frustumCulled = false; ag.setDrawRange(0, Math.floor(AN * GQ.ash)); scene.add(ash);
 const wrap = (v, c) => c + ((v - c + 30) % 60 + 60) % 60 - 30;
 scene.add(camera); const flash = new THREE.SpotLight(0xfff2cc, 0, 45, .5, .5, 1.5); flash.position.set(.2, -.1, 0); flash.target.position.set(0, 0, -10); camera.add(flash, flash.target); let flashOn = true;
 const gun = new THREE.Group(), gMat = new THREE.MeshStandardMaterial({ color: 0x2b2f2b, metalness: .85, roughness: .35 }), gMat2 = new THREE.MeshStandardMaterial({ color: 0x5a4632, roughness: .8 });
@@ -190,7 +205,7 @@ const stars = new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xffffff, s
 scene.add(stars);
 
 // ===== CHUNKED INFINITE WORLD =====
-const CS = 64, RAD = isTouch ? 1 : 2, chunks = {}, tg = new THREE.Group(), mg = new THREE.Group();
+const CS = 64, RAD = GQ.rad, chunks = {}, tg = new THREE.Group(), mg = new THREE.Group();
 scene.add(tg, mg);
 const terrMat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 });
 const nc = document.createElement('canvas'); nc.width = nc.height = 256; const nx = nc.getContext('2d'), nd = nx.createImageData(256, 256);
@@ -205,7 +220,7 @@ const propCfg = [[26, r => [1, 4 + r() * 5, 1]], [14, r => { const s = 1 + r() *
   [5, r => [2.5 + r() * 3, 4 + r() * 6, 2.5 + r() * 3]], [12, r => { const s = 1 + r() * 2; return [s * .6, s * 2, s * .6]; }]];
 const mul = a => () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
 
-let grassOn = !isTouch, grassMeshes = [], visT = 0;
+let grassOn = GQ.grass > 0, grassDensity = GQ.grass, grassMeshes = [], visT = 0;
 const grassGeo = (() => { const pos = [], col = [], nor = [], idx = [];
   for (let k = 0; k < 2; k++) { const a = k * Math.PI / 2, cx = Math.cos(a), sz = Math.sin(a), b = pos.length / 3;
     for (let r = 0; r <= 2; r++) { const y = r / 2, w = .075 * (1 - y * .9); for (const sg of [-1, 1]) { pos.push(cx * w * sg, y * .8, sz * w * sg); const g = .3 + y * .7; col.push(g, g, g); nor.push(0, 1, 0); } }
@@ -228,7 +243,7 @@ function burst(pt, hex, n, sp) { const c = new THREE.Color(hex); for (let q = 0;
 function stepParts(dt) { for (let i = 0; i < NP; i++) { const k = i * 3; if (pl[i] <= 0) { pp[k + 1] = -9999; continue; } pl[i] -= dt; pv[k + 1] -= 14 * dt; pp[k] += pv[k] * dt; pp[k + 1] += pv[k + 1] * dt; pp[k + 2] += pv[k + 2] * dt; } pg.attributes.position.needsUpdate = true; pg.attributes.color.needsUpdate = true; }
 function fillGrass(i, j, gmesh, gi) { // (re)plant a chunk's grass: skips dug/filled ground, sits on the current surface
   const gr = mul(((i * 2654435761) ^ (j * 40503) ^ (gi * 977)) >>> 0), go = new THREE.Object3D(); let cnt = 0;
-  for (let q = 0; q < 800; q++) { const x = (i - .5 + gr()) * CS, z = (j - .5 + gr()) * CS, sc = .55 + gr() * .75, ry = gr() * 6.28; if (Math.hypot(x, z) < 16 || Math.abs(D(x, z)) > .02) continue;
+  for (let q = 0, lim = Math.floor(1200 * grassDensity); q < lim; q++) { const x = (i - .5 + gr()) * CS, z = (j - .5 + gr()) * CS, sc = .55 + gr() * .75, ry = gr() * 6.28; if (Math.hypot(x, z) < 16 || Math.abs(D(x, z)) > .02) continue;
     const h0 = H(x, z); if (Math.abs(H(x + 1, z) - h0) + Math.abs(H(x, z + 1) - h0) > 1.3) continue;
     go.position.set(x, h0 - .03, z); go.rotation.set(0, ry, 0); go.scale.set(sc * .9, sc, sc * .9); go.updateMatrix(); gmesh.setMatrixAt(cnt++, go.matrix); }
   gmesh.count = cnt; gmesh.instanceMatrix.needsUpdate = true;
@@ -267,7 +282,7 @@ function makeChunk(i, j) {
       for (let b = 0; b < 2; b++) { const fr = b ? .8 : .55, len = (1.7 + br() * 1.2) * (1.2 - fr * .5); bo.position.set(x, y + h * fr, z); bo.rotation.set(1 + br() * .4, br() * 6.28, 0); bo.scale.set(1, len, 1); bo.updateMatrix(); bm.setMatrixAt(n2 * 2 + b, dead ? ZERO : bo.matrix); } });
     bm.count = trees.length * 2; bm.frustumCulled = false; bm.castShadow = true; scene.add(bm); props.push(bm); trunk.userData.br = bm;
   }
-  grassMats.forEach((gm, gi) => { const gmesh = new THREE.InstancedMesh(grassGeo, gm, 800); fillGrass(i, j, gmesh, gi); // wind-blown dry grass (G toggles it)
+  grassMats.forEach((gm, gi) => { const gmesh = new THREE.InstancedMesh(grassGeo, gm, 1200); fillGrass(i, j, gmesh, gi); // wind-blown dry grass (G toggles it)
     gmesh.frustumCulled = false; gmesh.receiveShadow = true; gmesh.visible = grassOn; scene.add(gmesh); props.push(gmesh); grass.push([gmesh, gi]); grassMeshes.push({ m: gmesh, x: i * CS, z: j * CS }); });
   chunks[i + ',' + j] = { mesh, props, grass, solids, i, j };
 }
@@ -349,16 +364,40 @@ function initNet() {
     const body = new THREE.Mesh(new THREE.CylinderGeometry(.35, .35, 1.2, 10), new THREE.MeshStandardMaterial({ color: 0xff0055, emissive: 0x550022 })); body.position.y = .6;
     const head = new THREE.Mesh(new THREE.SphereGeometry(.3, 10, 8), body.material); head.position.y = 1.5; body.castShadow = true;
     const cv = document.createElement('canvas'); cv.width = 256; cv.height = 64; const cc = cv.getContext('2d');
-    cc.font = 'bold 34px Courier New'; cc.textAlign = 'center'; cc.fillStyle = '#0f6'; cc.fillText(d.name || 'Survivor', 128, 42);
+    cc.font = 'bold 34px Courier New'; cc.textAlign = 'center'; cc.fillStyle = '#0f6'; cc.fillText(d.name || 'Survivor', 128, 42, 240);
     const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), depthTest: false })); tag.scale.set(3, .75, 1); tag.position.y = 2.3;
     g.add(body, head, tag); g.position.set(d.x, d.y - EYE, d.z); scene.add(g);
-    remote[s.key] = { g, tp: new THREE.Vector3(d.x, d.y - EYE, d.z) }; $('player-count').innerText = Object.keys(remote).length + 1;
+    remote[s.key] = { g, tp: new THREE.Vector3(d.x, d.y - EYE, d.z), tag, cc, name: d.name }; $('player-count').innerText = Object.keys(remote).length + 1;
   });
-  db.ref('players').on('child_changed', s => { const r = remote[s.key]; if (r) { const d = s.val(); r.tp.set(d.x, d.y - EYE, d.z); } });
+  db.ref('players').on('child_changed', s => { const r = remote[s.key]; if (r) { const d = s.val(); r.tp.set(d.x, d.y - EYE, d.z); if (d.name && d.name !== r.name) { r.name = d.name; r.cc.clearRect(0, 0, 256, 64); r.cc.fillText(d.name, 128, 42, 240); r.tag.material.map.needsUpdate = true; } } });
   db.ref('players').on('child_removed', s => { if (remote[s.key]) { scene.remove(remote[s.key].g); delete remote[s.key]; $('player-count').innerText = Object.keys(remote).length + 1; } });
 }
 
-// ===== CHAT =====
+// ===== SETTINGS: username, graphics, controls (graphics + controls are saved on this device, the name in Firestore) =====
+function cleanName(n) { return String(n || '').replace(/[^\p{L}\p{N} _.\-]/gu, '').replace(/\s+/g, ' ').trim().slice(0, 20); }
+function setName(n) { pname = n; $('player-name').innerText = n; if (net && uid) db.ref('players/' + uid + '/name').set(n).catch(() => {}); }
+function renderSettings() {
+  $('gfxopts').innerHTML = Object.keys(GFX).map(k => `<button class="gopt${k === gfxKey ? ' sel' : ''}" data-k="${k}"><b>${GFX[k].n}</b><small>${GFX[k].d}</small></button>`).join('');
+  const cm = store.get('mobase_mode') || 'auto'; document.querySelectorAll('#ctlopts button').forEach(b => b.classList.toggle('sel', b.dataset.m === cm));
+  $('nameIn').value = pname || ''; $('nameIn').disabled = $('nameBtn').disabled = !uid; $('nameMsg').textContent = uid ? 'Saved to your account. You can also edit "name" in Firestore (users > your id).' : 'Sign in to change your name.';
+}
+function openSettings() { renderSettings(); $('settings').style.display = 'flex'; }
+function closeSettings() { $('settings').style.display = 'none'; }
+$('gearBtn').addEventListener('click', e => { e.stopPropagation(); openSettings(); });
+$('setclose').addEventListener('click', closeSettings);
+function chooseGfx(k) { store.set('mobase_gfx', k); if (k === 'realistic') store.set('mobase_gfx_try', 'pending'); else store.del('mobase_gfx_try'); $('gfxmsg').textContent = 'Saved! Applying ' + GFX[k].n + '...'; save(); setTimeout(() => location.reload(), 400); }
+$('gfxopts').addEventListener('click', e => { const b = e.target.closest('.gopt'); if (!b || b.dataset.k === gfxKey) return; if (b.dataset.k === 'realistic') $('gfxwarn').style.display = 'flex'; else chooseGfx(b.dataset.k); });
+$('gfxyes').addEventListener('click', () => { $('gfxwarn').style.display = 'none'; chooseGfx('realistic'); });
+$('gfxno').addEventListener('click', () => { $('gfxwarn').style.display = 'none'; });
+$('ctlopts').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; if (b.dataset.m === 'auto') store.del('mobase_mode'); else store.set('mobase_mode', b.dataset.m); location.href = location.pathname; });
+$('nameBtn').addEventListener('click', () => {
+  const n = cleanName($('nameIn').value); if (n.length < 2) { $('nameMsg').textContent = 'Name needs 2-20 letters or numbers.'; return; }
+  userDoc().set({ name: n }, { merge: true }).then(() => { setName(n); $('nameMsg').textContent = 'Saved! You are now "' + n + '".'; }).catch(() => { $('nameMsg').textContent = 'Could not save the name (check your Firestore rules).'; });
+});
+$('nameIn').addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') $('nameBtn').click(); });
+if (gfxNote) setTimeout(() => addChat(gfxNote, 'sys'), 2000);
+
+// ===== CHAT + COMMANDS =====
 const chatIn = $('chatin'), chatLog = $('chatlog');
 function addChat(text, cls, age = 0) { // age (seconds) lets messages that were sent a while ago appear already faded
   for (const line of String(text).split('\n')) { const d = document.createElement('div'); d.className = 'cl ' + (cls || ''); d.textContent = line; if (age > 0) d.style.animationDelay = '-' + Math.min(age, 60) + 's'; chatLog.appendChild(d); setTimeout(() => d.remove(), Math.max(0, 60 - age) * 1000); }
@@ -369,11 +408,11 @@ function closeChat() { chatting = false; chatIn.style.display = 'none'; chatIn.b
 chatIn.addEventListener('keydown', e => { e.stopPropagation();
   if (e.key === 'Enter') { const v = chatIn.value.trim(); if (v) act({ t: 'chat', text: v.slice(0, 200) }); closeChat(); if (!isTouch) controls.lock(); }
   else if (e.key === 'Escape') { closeChat(); $('blocker').style.display = 'flex'; } });
-document.addEventListener('pointerlockerror', () => { $('blocker').style.display = 'flex'; });
+document.addEventListener('pointerlockerror', () => { $('blocker').style.display = 'flex'; msg('Mouse capture failed. On a phone? Settings > Controls > Phone / tablet'); });
 
 // ===== CONTROLS / PHYSICS =====
 const controls = new THREE.PointerLockControls(camera, document.body), P = camera.position, EYE = 1.6, R = .35;
-$('blocker').addEventListener('click', () => { if (uid) { if (isTouch) startTouch(); else controls.lock(); } });
+$('blocker').addEventListener('click', () => { if (!uid) return; if (isTouch) startTouch(); else if (!document.body.requestPointerLock) { store.set('mobase_mode', 'touch'); location.reload(); } else controls.lock(); }); // no mouse-capture (phones in desktop mode)? switch to touch controls
 controls.addEventListener('lock', () => { ac = ac || new (window.AudioContext || window.webkitAudioContext)(); if (ac.state === 'suspended') ac.resume(); audioInit(); $('blocker').style.display = 'none'; });
 controls.addEventListener('unlock', () => { $('blocker').style.display = (chatting || invOpen) ? 'none' : 'flex'; for (const k in key) delete key[k]; mouseL = mouseR = false; save(); });
 addEventListener('blur', () => { for (const k in key) delete key[k]; mouseL = mouseR = false; });
@@ -585,12 +624,11 @@ function loop() {
   animMobs(dt, t); updateGhost(dt);
   if (performance.now() > msgUntil) { const off = performance.now() - hbLast > 12000; $('status').innerText = off ? 'SERVER OFFLINE' : 'Online'; $('status').className = off ? 'warning' : 'success'; }
   updateChunks();
-  for (const k of dirty) if (chunks[k]) { const c = chunks[k]; paintChunk(c.mesh.geometry); c.grass.forEach(([m, gi]) => fillGrass(c.i, c.j, m, gi)); } // terrain changed: repaint + replant grass
-  dirty.clear();
+  for (const k of dirty) { dirty.delete(k); if (chunks[k]) { const c = chunks[k]; paintChunk(c.mesh.geometry); c.grass.forEach(([m, gi]) => fillGrass(c.i, c.j, m, gi)); break; } } // terrain changed: repaint ONE chunk per frame (no lag spikes while digging)
   // sky & light
   const raw = Math.sin(dayT * 6.283) - .7, se = raw > 0 ? raw / .3 : raw / 1.7, day = Math.min(1, Math.max(0, se * 3 + .4)), ang = dayT * 6.283;
   skyU.t.value.copy(PAL.nt).lerp(PAL.dt, day); skyU.b.value.copy(PAL.nb).lerp(PAL.db, day);
-  scene.fog.color.copy(skyU.b.value); scene.fog.density = .013 + (1 - day) * .006;
+  scene.fog.color.copy(skyU.b.value); scene.fog.density = (.013 + (1 - day) * .006) * GQ.fog;
   sd.set(Math.cos(ang), se, .3).normalize(); skyU.sd.value.copy(sd); sun.position.copy(P).addScaledVector(sd, se >= 0 ? 120 : -120); sun.target.position.copy(P);
   sun.intensity = .25 + day * 1.1; sun.color.set(day > .5 ? 0xffe2a8 : 0x6f8cff); hemi.intensity = .18 + day * .35;
   stars.material.opacity = 1 - day; stars.position.copy(P); sky.position.copy(P);
