@@ -7,7 +7,12 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <title>Mobase - 3D Wasteland</title>
   <link rel="icon" href="favicon.ico" sizes="any">
-  <link rel="stylesheet" href="style.css?v=3">
+  <link rel="stylesheet" href="style.css?v=4">
+  <script>
+    function showErr(m) { var b = document.getElementById('errbox'); if (b) { b.style.display = 'block'; b.textContent = 'Error (tap to hide): ' + m; } }
+    window.addEventListener('error', function (e) { showErr(e.message + (e.filename ? ' [' + e.filename.split('/').pop() + ':' + e.lineno + ']' : '')); });
+    window.addEventListener('unhandledrejection', function (e) { showErr(String(e.reason && e.reason.message || e.reason)); });
+  </script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script>
     const E = "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/";
@@ -49,7 +54,7 @@
     </div>
   </div>
 
-  <div id="rotate">Rotate your phone to landscape</div>
+  <div id="errbox" onclick="this.style.display='none'"></div>
   <div id="touch">
     <div id="lookzone"></div>
     <div id="joy"><div id="joyk"></div></div>
@@ -81,9 +86,18 @@
           <b>BAG</b>: inventory + crafting | tap hotbar to switch item | <b>CHAT</b> for commands (/help)
         </p>
       </div>
+      <button id="gearBtn">&#9881; SETTINGS (name, graphics, controls)</button>
     </div>
   </div>
 
-  <script src="app.js?v=3"></script>
+  <div id="settings"><div id="setbox">
+    <button id="setclose">&#10005;</button><h3>SETTINGS</h3>
+    <h4>Survivor name</h4><div class="row"><input id="nameIn" maxlength="20" autocomplete="off" placeholder="Your name"><button id="nameBtn">SAVE</button></div><p id="nameMsg" class="hint"></p>
+    <h4>Graphics</h4><div id="gfxopts"></div><p id="gfxmsg" class="hint">Saved on this device. The game reloads when you change graphics.</p>
+    <h4>Controls</h4><div id="ctlopts"><button data-m="auto">Auto</button><button data-m="touch">Phone / tablet</button><button data-m="desktop">Keyboard + mouse</button></div><p class="hint">If the game won't start on your phone, choose Phone / tablet.</p>
+  </div></div>
+  <div id="gfxwarn"><div id="warnbox"><h3>&#9888; WARNING</h3><p>These Graphics Could Crash Your Game/Device, Proceed Anyway?</p><div class="row"><button id="gfxyes">PROCEED ANYWAY</button><button id="gfxno">CANCEL</button></div></div></div>
+
+  <script src="app.js?v=4"></script>
 </body>
 </html>
