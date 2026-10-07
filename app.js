@@ -489,7 +489,7 @@ function addTable(key, v) {
   if (tablesList.some(t => t.key === key)) return;
   const g = new THREE.Group(), bx = (w, h, d, m, x, y, z) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); o.position.set(x, y, z); o.castShadow = o.receiveShadow = true; g.add(o); };
   bx(1.1, .12, 1.1, tableTop, 0, .9, 0); for (const [lx, lz] of [[-.45, -.45], [.45, -.45], [-.45, .45], [.45, .45]]) bx(.12, .84, .12, tableMat, lx, .42, lz); bx(.9, .06, .9, tableMat, 0, .28, 0);
-  g.position.set(v.x, v.y, v.z); g.rotation.y = v.ry || 0; scene.add(g);
+  g.position.set(v.x, v.y, v.z); g.rotation.y = v.ry || 0; g.userData.tkey = key; scene.add(g);
   tablesList.push({ key, x: v.x, z: v.z, y: v.y, g, solid: { x: v.x, z: v.z, r: .72, top: v.y + .96, key: 't_' + key } }); if (Math.hypot(v.x - P.x, v.z - P.z) < 40) sound('place', { x: v.x, z: v.z });
 }
 function removeTable(key) { const n = tablesList.findIndex(t => t.key === key); if (n >= 0) { scene.remove(tablesList[n].g); tablesList.splice(n, 1); } }
@@ -650,22 +650,26 @@ function loop() {
   for (let i = 0; i < AN; i++) { const k = i * 3; ap[k] = wrap(ap[k] + (Math.sin(t * .5 + i) * .5 + .8) * dt, P.x); ap[k + 1] = wrap(ap[k + 1] - .7 * dt, P.y); ap[k + 2] = wrap(ap[k + 2] + Math.cos(t * .4 + i) * .4 * dt, P.z); }
   ag.attributes.position.needsUpdate = true; flash.intensity = flashOn ? (1 - day) * 2.5 : 0; grade.uniforms.time.value = (t % 50) + 1;
   digCd -= dt; swing = Math.max(0, swing - dt * 5); shovel.visible = mode === 'dig'; pickM.visible = mode === 'pick'; starHand.visible = mode === 'star'; starL.intensity = mode === 'star' ? 2.4 : 0;
-  { const nm = performance.now(); if (curMine && (!mouseL || mode !== 'dig' || nm - mineLast > 600)) curMine = null;
+  let tb = null; // crafting table under the crosshair (any item can break it)
+  { const nm = performance.now(); if (curMine && (!mouseL || (mode !== 'dig' && mode !== 'pick') || nm - mineLast > 600)) curMine = null;
+    if (isPlay() && mouseL && tablesList.length) { const th = ray(tablesList.map(t => t.g), 4)[0]; if (th) { let o = th.object; while (o && !o.userData.tkey) o = o.parent; if (o) tb = { key: o.userData.tkey, point: th.point }; } }
+    if (tb && digCd <= 0) { digCd = .35; swing = 1; act({ t: 'breaktable', id: tb.key }); sound('chop'); burst(tb.point, 0xb98a4e, 6, 3); } // left-click a crafting table with ANY item (or bare hands) to break it
     $('mineBar').style.display = curMine ? 'block' : 'none'; if (curMine) $('mineFill').style.width = Math.min(100, (nm - mineStart) / 600) + '%'; // Starlight: 60s of unbroken mining
-    if (isPlay() && mode === 'dig' && (mouseL || mouseR) && digCd <= 0) {
+    if (isPlay() && mode === 'dig' && (mouseL || mouseR) && digCd <= 0 && !tb) {
       const tr = mouseL ? ray(trunks, 4.5)[0] : null, sm = !tr && mouseL ? ray(starM, 4.5)[0] : null, hh = tr || sm ? null : ray([tg], 7)[0]; digCd = .22; swing = 1;
       if (tr) { chop(tr); sound('chop'); burst(tr.point, 0xa07848, 6, 3); }
       else if (sm) { const k = sm.object.userData.ids[sm.instanceId]; if (k) { if (k !== curMine) { curMine = k; mineStart = nm; } mineLast = nm; act({ t: 'mine', key: k }); if (Math.random() < .3) burst(sm.point, 0x66e6ff, 3, 2); } }
       else if (hh) { digAt(hh.point.x, hh.point.z, mouseL ? -.45 : .45); sound('dig'); burst(hh.point, 0x6b5a40, 8, 3.5); }
     }
-    if (isPlay() && mode === 'pick' && mouseL && digCd <= 0) { digCd = .4; swing = 1; const rk = ray(rockM.concat(ruinM), 4.5)[0]; if (rk) { act({ t: 'mine', key: rk.object.userData.ids[rk.instanceId] }); sound('chop'); burst(rk.point, 0x9a9da0, 8, 4); } }
-    if (isPlay() && mode === 'door' && mouseL && digCd <= 0) { digCd = .4; placeDoor(); }
-    if (isPlay() && mode === 'table' && mouseL && digCd <= 0) { digCd = .5; const h = ray([tg], 8)[0]; if (h) act({ t: 'table', cx: +h.point.x.toFixed(2), cz: +h.point.z.toFixed(2), ry: +camera.rotation.y.toFixed(2) }); }
+    if (isPlay() && mode === 'pick' && mouseL && digCd <= 0 && !tb) { digCd = .4; swing = 1; const rk = ray(rockM.concat(ruinM, starM), 4.5)[0];
+      if (rk) { const k = rk.object.userData.ids[rk.instanceId], star = k[0] === 's'; act({ t: 'mine', key: k }); if (star) { if (k !== curMine) { curMine = k; mineStart = nm; } mineLast = nm; if (Math.random() < .4) burst(rk.point, 0x66e6ff, 3, 2); } else { sound('chop'); burst(rk.point, 0x9a9da0, 8, 4); } } } // pickaxe: stone, or Starlight (same 60s hold)
+    if (isPlay() && mode === 'door' && mouseL && digCd <= 0 && !tb) { digCd = .4; placeDoor(); }
+    if (isPlay() && mode === 'table' && mouseL && digCd <= 0 && !tb) { digCd = .5; const h = ray([tg], 8)[0]; if (h) act({ t: 'table', cx: +h.point.x.toFixed(2), cz: +h.point.z.toFixed(2), ry: +camera.rotation.y.toFixed(2) }); }
   }
   shovel.position.set(.32, -.2, -.65 - swing * .08); shovel.rotation.set(.7 + swing * .6, 0, -.15); pickM.position.copy(shovel.position); pickM.rotation.copy(shovel.rotation);
   gun.visible = mode === 'combat'; recoil = Math.max(0, recoil - dt * 9); flashT -= dt; mf.visible = flashT > 0;
   if (reload > 0 && (reload -= dt) <= 0) ammo = 15;
-  if (isPlay() && mode === 'combat' && mouseL) fire();
+  if (isPlay() && mode === 'combat' && mouseL && !tb) fire(); // aiming at a table within reach = pistol-whip it instead of shooting
   const bob = Math.hypot(vx, vz) / 6;
   gun.position.set(.28 + Math.sin(t * 8) * .006 * bob, -.26 + Math.abs(Math.sin(t * 8)) * .012 * bob - (reload > 0 ? .12 : 0), -.55 + recoil * .07);
   gun.rotation.x = recoil * .12 + (reload > 0 ? -.7 : 0);
